@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: logstash
+  labels:
+    k8s-app: logstash
+    app: logstash
+    node.type: logstash-node
+spec:
+  selector:
+    matchLabels:
+      k8s-app: logstash
+      app: logstash
+      node.type: logstash-node
+  template:
+    metadata:
+      labels:
+        k8s-app: logstash
+        app: logstash
+        node.type: logstash-node
+    spec:
+      nodeSelector:
+        testbed-role: "Edge"
+      tolerations:
+      - key: "node-role.kubernetes.io/control-plane"
+        operator: "Exists"
+        effect: "NoSchedule"
+      - key: "node.kubernetes.io/not-ready"
+        operator: "Exists"
+        effect: "NoExecute"
+      - key: "node.kubernetes.io/unreachable"
+        operator: "Exists"
+        effect: "NoExecute"
+      containers:
+      - name: logstash
+        image: public.ecr.aws/elastic/logstash:8.17.3
+        volumeMounts:
+        - name: logstash-config
+          mountPath: /usr/share/logstash/pipeline/logstash.conf
+          readOnly: true
+          subPath: logstash.conf
+        - name: logstash-yaml
+          mountPath: /usr/share/logstash/config/logstash.yml
+          readOnly: true
+          subPath: logstash.yml
+        ports:
+        - containerPort: 5400
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+          limits:
+            cpu: "1"
+            memory: "1Gi"
+      volumes:
+      - name: logstash-config
+        configMap:
+          name: logstash-conf-config
+      - name: logstash-yaml
+        configMap:
+          name: logstash-yaml-config

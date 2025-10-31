@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: iot-producer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: iot-producer
+  template:
+    metadata:
+      labels:
+        app: iot-producer
+    spec:
+      nodeSelector:
+        testbed-role: "IoT"
+      containers:
+      - name: iot-producer
+        image: chuangtw/iot
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: KAFKA_BROKER
+          value: kafka:9092
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "200m"
+            memory: "256Mi"

@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: logstash-conf-config
+  labels:
+    k8s-app: logstash
+data:
+  logstash.conf: |-
+    input {
+      kafka {
+        bootstrap_servers => "kafka:9092"
+        topics => ["test"]
+        group_id => "logstash-group-new"
+        auto_offset_reset => "earliest"
+      }
+
+      beats { port => 5044 }
+      tcp   { port => 50000 }
+    }
+    filter{
+      # Add any Logstash filters here
+    }
+    output {
+      stdout { codec => rubydebug }
+      elasticsearch {
+        hosts  => ["http://elastic-service:9200"]
+        index  => "test"
+        http_compression => false
+      }
+    }

@@ -1,0 +1,29 @@
+{
+  "cluster_name": "arena-testbed",
+  "nodes": [
+    {
+      "name": "IoT",
+      "role": "worker",
+      "cpu": "1",
+      "memory": "2Gi"
+    },
+    {
+      "name": "Edge",
+      "role": "worker",
+      "cpu": "2",
+      "memory": "4Gi"
+    },
+    {
+      "name": "Cloud",
+      "role": "worker",
+      "cpu": "8",
+      "memory": "16Gi"
+    },
+    {
+      "name": "Controller",
+      "role": "control-plane",
+      "cpu": "8",
+      "memory": "16Gi"
+    }
+  ]
+}

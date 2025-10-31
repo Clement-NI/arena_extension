@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: logstash-yaml-config
+  labels:
+    k8s-app: logstash
+data:
+  logstash.yml: |-
+    http.host: "0.0.0.0"
+    xpack.monitoring.enabled: false

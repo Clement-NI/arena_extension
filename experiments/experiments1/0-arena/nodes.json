@@ -1,0 +1,17 @@
+{
+  "cluster_name": "arena-testbed",
+  "nodes": [
+    {
+      "name": "IoT",
+      "role": "worker",
+      "cpu": "4",
+      "memory": "16Gi"
+    },
+    {
+      "name": "Controller",
+      "role": "control-plane",
+      "cpu": "4",
+      "memory": "16Gi"
+    }
+  ]
+}

@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: es
+  labels:
+    app: elastic
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: elastic
+  template:
+    metadata:
+      labels:
+        app: elastic
+    spec:
+      nodeSelector:
+        testbed-role: Cloud
+      tolerations:
+      - key: "node-role.kubernetes.io/control-plane"
+        operator: "Exists"
+        effect: "NoSchedule"
+      terminationGracePeriodSeconds: 60
+      containers:
+      - name: es
+        image: docker.elastic.co/elasticsearch/elasticsearch:8.17.3
+        ports:
+        - containerPort: 9200
+          name: http
+        - containerPort: 9300
+          name: transport
+        env:
+        - name: cluster.name
+          value: elasticsearch-cluster
+        - name: node.name
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: discovery.seed_hosts
+          value: elasticsearch-service
+        - name: ELASTIC_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: elastic-secret
+              key: elastic-password
+        - name: ES_JAVA_OPTS
+          value: "-Xms1g -Xmx1g"
+        volumeMounts:
+        - name: es-data
+          mountPath: /usr/share/elasticsearch/data
+        - name: elasticsearch-config-volume
+          mountPath: /usr/share/elasticsearch/config/elasticsearch.yml
+          subPath: elasticsearch.yml
+        readinessProbe:
+          exec:
+            command: ["sh", "-c", "curl -fsSL http://localhost:9200/_cluster/health || exit 1"]
+          initialDelaySeconds: 60
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 5
+        livenessProbe:
+          exec:
+            command: ["sh", "-c", "curl -fsSL http://localhost:9200/_cluster/health || exit 1"]
+          initialDelaySeconds: 60
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 5
+      volumes:
+      - name: es-data
+        emptyDir: {}
+      - name: elasticsearch-config-volume
+        configMap:
+          name: elastic-config
+          items:
+          - key: elasticsearch.yml
+            path: elasticsearch.yml

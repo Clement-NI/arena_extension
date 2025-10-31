@@ -1,0 +1,16 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: logstash-bandwidth
+spec:
+  action: bandwidth
+  mode: all
+  selector:
+    namespaces: [default]
+    labelSelectors:
+      app: logstash
+  direction: to
+  bandwidth:
+    rate: "5mbit"
+    buffer: 10000
+    limit: 10000

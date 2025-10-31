@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    es.service: elastic-service
+  name: elastic-service
+spec:
+  selector:
+    app: elastic
+  ports:
+    - protocol: TCP
+      port: 9200
+      targetPort: 9200

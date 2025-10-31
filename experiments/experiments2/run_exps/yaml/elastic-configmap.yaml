@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: elastic-config
+data:
+  # This configures Elasticsearch for a single node, open access, and CORS
+  # IMPORTANT: xpack.security.enabled: false means NO AUTHENTICATION.
+  # If you want security, change this to true and re-add authentication details
+  # in Kibana and Logstash.
+  elasticsearch.yml: |-
+    cluster.name: docker-cluster
+    network.host: 0.0.0.0
+    discovery.type: single-node
+    xpack.security.enabled: false
+    xpack.security.http.ssl.enabled: false
+    http.cors.enabled: true
+    http.cors.allow-origin: "http://localhost:4200"
