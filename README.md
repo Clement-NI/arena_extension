@@ -10,56 +10,98 @@ This repository contains the Arena setup scripts and experiment code used in the
 - `arena/experiments/experiments2`: Contains scripts used to validate the network chaos injection mechanism.
 
 
-## Quick Start for launching an Arean testbed
+## Quick Start for launching an Arena testbed
 
-Prerequisites: `git` and `Debian 11` operating system
+Arena now drives a **multi-host kind** cluster built from the
+[`Clement-NI/kind_extension_for_arena`](https://github.com/Clement-NI/kind_extension_for_arena)
+fork. Each IoT/Edge/Cloud node lives on a docker context you choose — the
+placement is declared explicitly in `nodes.json`, not derived from a
+round-robin.
+
+Prerequisites:
+- `git`, Debian 11, Docker reachable on the manager host.
+- For multi-host runs: SSH access (key auth, `root@<host>`) from the
+  manager to every worker host. Use the fork's
+  `scripts/setup-multihost.sh` to propagate the SSH key and create the
+  docker contexts in one go.
 
 ```bash
-git clone https://github.com/satrai-lab/arena)
-chmod -R +x arena/
-cd arena/arena_testbed
+git clone https://github.com/Clement-NI/arena_extension
+chmod -R +x arena_extension/
+cd arena_extension/arena_testbed
+
+# Builds kind from the fork; tells you how to bootstrap SSH/contexts
 ./0-set_environments.sh
-./1-launch_cluster.sh
+
+# If you have remote hosts in nodes.json, run from this machine:
+#   bash /opt/kind_extension_for_arena/scripts/setup-multihost.sh \
+#        worker-host-1 worker-host-2 ...
+
+./1-launch_cluster.sh      # writes kind-cluster-config.json and creates the cluster
 ./2-set_frameworks.sh
 ```
 
-To remove the Arena testbed, run:
+Teardown:
 ```bash
 ./3-clean_cluster.sh
 ```
 
-To modify the number or specifications of nodes, edit the `nodes.json` file as shown below:
+### Configuring `nodes.json`
+
+Each entry in `hosts[]` declares one physical machine **and the
+Kubernetes nodes that run on it**. There is no top-level `nodes:` list;
+that placement is intentional.
+
 ```json
 {
   "cluster_name": "arena-testbed",
-  "nodes": [
+  "hosts": [
     {
-      "name": "IoT",
-      "role": "worker",
-      "cpu": "1",
-      "memory": "2Gi"
+      "context": "default",
+      "addr": "127.0.0.1",
+      "nodes": [
+        { "name": "Cloud",      "role": "worker",        "cpu": "8", "memory": "16Gi" },
+        { "name": "Controller", "role": "control-plane", "cpu": "8", "memory": "16Gi" }
+      ]
     },
     {
-      "name": "Edge",
-      "role": "worker",
-      "cpu": "2",
-      "memory": "4Gi"
+      "context": "edge-host-1",
+      "addr": "10.0.0.30",
+      "ssh":  "ssh://root@10.0.0.30",
+      "cpu":  "4",
+      "memory": "8Gi",
+      "nodes": [
+        { "name": "Edge", "role": "worker", "cpu": "2", "memory": "4Gi" }
+      ]
     },
     {
-      "name": "Cloud",
-      "role": "worker",
-      "cpu": "8",
-      "memory": "16Gi"
-    },
-    {
-      "name": "Controller",
-      "role": "control-plane",
-      "cpu": "8",
-      "memory": "16Gi"
+      "context": "iot-host-1",
+      "addr": "10.0.0.20",
+      "ssh":  "ssh://root@10.0.0.20",
+      "cpu":  "2",
+      "memory": "4Gi",
+      "nodes": [
+        { "name": "IoT", "role": "worker", "cpu": "1", "memory": "2Gi" }
+      ]
     }
   ]
 }
 ```
+
+Field reference:
+
+| Field | Purpose |
+|---|---|
+| `hosts[].context` | docker context name on the manager. Use `"default"` for the local daemon. |
+| `hosts[].addr`    | externally-reachable IP/host of that machine (kubeconfig + Swarm join). |
+| `hosts[].ssh`     | `ssh://user@host` URL used by `setup-multihost.sh` to create the docker context. Leave empty for `default`. |
+| `hosts[].cpu`, `.memory` | total capacity of this machine, used to compute per-node `system-reserved`. Optional — falls back to the local daemon's totals when omitted. |
+| `hosts[].nodes[]` | the K8s nodes scheduled on this host. Exactly one must be `control-plane`, and it lives on `hosts[0]` (the Swarm manager). |
+| `nodes[].name`    | becomes the `testbed-role` label; use as `nodeSelector: testbed-role=IoT`. Shared names = multiple nodes of the same logical role. |
+
+For a single-host run, keep one host with `context: "default"` and all
+your nodes nested inside it — no SSH, no addresses, nothing else to
+configure.
 
 You can deploy your application using the `kubectl` command, as shown below:
 
