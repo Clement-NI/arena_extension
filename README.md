@@ -5,9 +5,25 @@ Arena is a Kubernetes-based testbed for evaluating applications across the compu
 This repository contains the Arena setup scripts and experiment code used in the paper.
 
 ## Repository Layout
-- `arena/arena-testbed`: Contains scripts for deploying an Arena instance on a single host.
-- `arena/experiments/experiments1`: Contains scripts used to validate the emulation fidelity between containers and VMs.
-- `arena/experiments/experiments2`: Contains scripts used to validate the network chaos injection mechanism.
+- `arena_testbed/`: scripts for deploying an Arena instance (single- or multi-host).
+- `experiments/experiments1`: validates the emulation fidelity between containers and VMs.
+- `experiments/experiments2`: validates the network chaos injection mechanism.
+- `tools/topology/`: region-based topology compiler. Reads a `topology.yaml` declaring regions + per-region-pair rules + per-node-pair exceptions, emits NetworkChaos / probe deployments / CSV / Mermaid. See `tools/topology/README.md`.
+- `examples/`: sample `nodes.json` (3-tier with multiple instances per tier) and matching `topology.yaml`.
+- `scripts/verify-topology.sh`: ping every worker→worker pair after applying the topology, report PASS/FAIL per link against the expected latency.
+
+## Node labels
+
+`1-launch_cluster.sh` stamps four labels on every kind node:
+
+| label             | example      | use it as                                  |
+|-------------------|--------------|--------------------------------------------|
+| `testbed-role`    | `IoT-1`      | unique node selector (backwards-compatible) |
+| `arena.tier`      | `IoT`        | "any node of this tier" workloads          |
+| `arena.node`      | `iot-1`      | per-instance Chaos Mesh targeting          |
+| `arena.host`      | `iot-host-1` | which physical host this kind node runs on |
+
+`arena.tier` defaults to the part before the first dash of the node name; override it explicitly with a `"tier"` field in `nodes.json` if your naming scheme differs.
 
 
 ## Quick Start for launching an Arena testbed

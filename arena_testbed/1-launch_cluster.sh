@@ -82,12 +82,16 @@ HOSTS_BUILT=$(jq --argjson lcpu "$LOCAL_NCPU" --argjson lmem "$LOCAL_MEM_GIB" '
           else 0 end) as $node_mem_mib |
          ($host_cpu - $node_cpu)              as $cpu_reserved |
          (($host_mem_gib * 1024) - $node_mem_mib) as $mem_reserved |
+         (.tier // (.name | split("-")[0])) as $tier |
+         (.name | ascii_downcase) as $node_lc |
          {
            role: .role,
            image: "kindest/node:v1.33.2",
            labels: {
              "testbed-role": .name,
-             "arena.host": .context
+             "arena.tier":   $tier,
+             "arena.node":   $node_lc,
+             "arena.host":   .context
            },
            kubeadmConfigPatches: [
              "apiVersion: kubeadm.k8s.io/v1beta3\nkind: \"" +

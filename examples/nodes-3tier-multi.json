@@ -1,0 +1,18 @@
+{
+  "cluster_name": "arena-testbed",
+  "hosts": [
+    {
+      "context": "default",
+      "addr": "127.0.0.1",
+      "nodes": [
+        { "name": "IoT-1",      "tier": "IoT",   "role": "worker",        "cpu": "1", "memory": "2Gi" },
+        { "name": "IoT-2",      "tier": "IoT",   "role": "worker",        "cpu": "1", "memory": "2Gi" },
+        { "name": "IoT-3",      "tier": "IoT",   "role": "worker",        "cpu": "1", "memory": "2Gi" },
+        { "name": "Edge-1",     "tier": "Edge",  "role": "worker",        "cpu": "2", "memory": "4Gi" },
+        { "name": "Edge-2",     "tier": "Edge",  "role": "worker",        "cpu": "2", "memory": "4Gi" },
+        { "name": "Cloud",      "tier": "Cloud", "role": "worker",        "cpu": "4", "memory": "8Gi" },
+        { "name": "Controller", "tier": "Controller", "role": "control-plane", "cpu": "2", "memory": "4Gi" }
+      ]
+    }
+  ]
+}

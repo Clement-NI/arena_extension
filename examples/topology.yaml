@@ -1,0 +1,53 @@
+# Arena topology example
+# --------------------------------------------------------------------
+# 3 regions, 5 worker nodes, asymmetric per-region defaults plus one
+# explicit exception. The Controller node is intentionally absent: the
+# compiler only walks worker nodes so we never shape K8s control traffic.
+#
+# Expects an arena nodes.json with these workers:
+#   IoT-1, IoT-2, IoT-3, Edge-1, Edge-2, Cloud
+# (see examples/nodes-3tier-multi.json for a matching config).
+# --------------------------------------------------------------------
+
+version: "1"
+
+# Two-step grouping: nodes → regions, regions → cross-region rules.
+regions:
+  east:
+    members: [IoT-1, IoT-3, Edge-1]
+  west:
+    members: [IoT-2, Edge-2]
+  central:
+    members: [Cloud]
+
+# Broadest fallback. Used whenever a more specific rule does not match.
+defaults:
+  intra-region:
+    latency: 5ms
+    jitter:  1ms
+    bw:      1Gbit
+    loss:    "0"
+  inter-region:
+    latency: 50ms
+    jitter:  5ms
+    bw:      100Mbit
+    loss:    "0.5"
+
+# Sparse matrix at region granularity. Each row overrides only the
+# fields it cares about; everything else inherits `defaults`.
+region_pairs:
+  - { from: east,    to: central, latency: 30ms, bw: 1Gbit   }
+  - { from: west,    to: central, latency: 45ms, bw: 500Mbit }
+  - { from: east,    to: west,    latency: 70ms              }
+
+# Per-node-pair overrides. Use sparingly — these are the rows you want
+# to be able to point at in the paper ("the same-building special case").
+exceptions:
+  - from: IoT-1
+    to:   Edge-1
+    latency: 2ms
+    comment: "same building"
+
+# When true, region_pairs and exceptions also apply in the reverse
+# direction. Set false if you want to express asymmetric links.
+symmetric: true
