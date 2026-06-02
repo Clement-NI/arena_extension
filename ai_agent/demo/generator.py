@@ -14,7 +14,7 @@ OUTPUT_DIR = SCRIPT_DIR / "output"
 
 
 def load_yaml(path: str) -> dict:
-    with open(path) as f:
+    with open(path, encoding='utf-8') as f:
         return yaml.safe_load(f)
 
 
@@ -28,7 +28,7 @@ def generate(topology: dict, profiles: dict) -> tuple[str, str]:
     Retourne (deployments_yaml, chaos_yaml).
     """
     env = Environment(
-        loader=FileSystemLoader(TEMPLATES_DIR),
+        loader=FileSystemLoader(TEMPLATES_DIR, encoding='utf-8'),
         trim_blocks=True,
         lstrip_blocks=True,
     )
@@ -87,8 +87,8 @@ def main():
     deployments_yaml, chaos_yaml = generate(topology, profiles)
 
     OUTPUT_DIR.mkdir(exist_ok=True)
-    (OUTPUT_DIR / "deployments.yaml").write_text(deployments_yaml)
-    (OUTPUT_DIR / "network-chaos.yaml").write_text(chaos_yaml)
+    (OUTPUT_DIR / "deployments.yaml").write_text(deployments_yaml, encoding='utf-8')
+    (OUTPUT_DIR / "network-chaos.yaml").write_text(chaos_yaml, encoding='utf-8')
 
     print(f"✅ Generated {len(topology['nodes'])} nodes, "
           f"{len(topology.get('links', []))} links")
