@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ name }}
+  labels:
+    app: {{ name }}
+    tier: {{ placement | lower }}
+spec:
+  replicas: {{ replicas | default(1) }}
+  selector:
+    matchLabels:
+      app: {{ name }}
+  template:
+    metadata:
+      labels:
+        app: {{ name }}
+        tier: {{ placement | lower }}
+    spec:
+      nodeSelector:
+        testbed-role: {{ placement }}
+      containers:
+        - name: {{ name }}
+          image: {{ image }}
+          ports:
+            - containerPort: {{ port | default(80) }}
+          resources:
+            requests:
+              cpu: "{{ resources.cpu }}"
+              memory: "{{ resources.memory }}"
+            limits:
+              cpu: "{{ resources.cpu }}"
+              memory: "{{ resources.memory }}"

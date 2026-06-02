@@ -1,0 +1,64 @@
+# Scénario : Surveillance vidéo intelligente (Smart City)
+#
+# 4 services :
+#   - camera (IoT)       : 2 caméras qui capturent des images
+#   - transcoder (Edge)  : transcode les flux vers un format léger
+#   - storage (Cloud)    : stocke les vidéos transcodées
+#   - analytics (Cloud)  : analyse les images avec un modèle ML
+#
+# 3 liens :
+#   camera → transcoder : 5G urbain (10ms, 200 Mbps)
+#   transcoder → storage : fibre datacenter (1ms, 10 Gbps)
+#   transcoder → analytics : fibre datacenter (1ms, 10 Gbps)
+#
+# Ressources cohérentes avec arena_testbed/nodes.json (IoT=1c/2Gi, Edge=2c/4Gi, Cloud=8c/16Gi)
+
+nodes:
+  - name: camera
+    placement: IoT
+    image: nginx:alpine          # placeholder léger pour test
+    replicas: 2
+    port: 80
+    resources:
+      cpu: "200m"
+      memory: "256Mi"
+
+  - name: transcoder
+    placement: Edge
+    image: nginx:alpine
+    replicas: 1
+    port: 80
+    resources:
+      cpu: "500m"
+      memory: "1Gi"
+
+  - name: storage
+    placement: Cloud
+    image: nginx:alpine
+    replicas: 1
+    port: 80
+    resources:
+      cpu: "500m"
+      memory: "1Gi"
+
+  - name: analytics
+    placement: Cloud
+    image: nginx:alpine
+    replicas: 1
+    port: 80
+    resources:
+      cpu: "1000m"
+      memory: "2Gi"
+
+links:
+  - from: camera
+    to: transcoder
+    network: 5G_urban
+
+  - from: transcoder
+    to: storage
+    network: fiber_datacenter
+
+  - from: transcoder
+    to: analytics
+    network: fiber_datacenter

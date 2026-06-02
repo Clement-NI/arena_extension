@@ -1,0 +1,24 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: {{ from_app }}-to-{{ to_app }}-delay
+spec:
+  action: delay
+  mode: all
+  selector:
+    namespaces:
+      - default
+    labelSelectors:
+      app: {{ from_app }}
+  direction: to
+  target:
+    mode: all
+    selector:
+      namespaces:
+        - default
+      labelSelectors:
+        app: {{ to_app }}
+  delay:
+    latency: "{{ latency }}"
+    jitter: "{{ jitter | default('0ms') }}"
+    correlation: "0"
