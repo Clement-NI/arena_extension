@@ -142,7 +142,18 @@ if kind get clusters | grep -q "${KIND_CLUSTER_NAME}"; then
 fi
 
 log_info "Creating cluster '${KIND_CLUSTER_NAME}' across ${HOSTS_LEN} host(s)..."
-kind --multihost --bootstrap-swarm create cluster \
+
+# --bootstrap-swarm forces Swarm overlay (10.0.x.x). Without it on a single
+# host, the fork falls back to a plain Docker bridge — simpler and avoids
+# VXLAN/iptables headaches (Grid'5000, restricted kernels, etc.).
+if [[ "$HOSTS_LEN" -ge 2 ]]; then
+  KIND_EXTRA_FLAGS="--bootstrap-swarm"
+else
+  KIND_EXTRA_FLAGS=""
+  log_info "Single-host: using bridge network (no Swarm bootstrap)."
+fi
+
+kind --multihost $KIND_EXTRA_FLAGS create cluster \
   --name "$KIND_CLUSTER_NAME" \
   --config "$OUTPUT_FILE" \
   || log_error "kind cluster creation failed"
