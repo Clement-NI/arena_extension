@@ -157,15 +157,18 @@ run_ping cloud iot    "60"
 run_ping cloud edge   "60"
 
 # ─── 7. Bandwidth check (UDP since TCP can't handle loss+delay) ──
-step "7. Bandwidth check (UDP, intra-region attendu ~100Mbit, inter ~50Mbit)"
-echo "iot → edge (exception 1Gbit, no loss) :"
+step "7. Bandwidth check (UDP — TCP collapses under loss+delay)"
+echo "iot → edge (exception: 1Gbit, 0% loss — push 1.2G):"
+echo "  Note: iperf3 single-thread UDP plateaus around ~500-600 Mbit/s (CPU-bound)."
+echo "        The 1Gbit tbf cap is therefore not reached."
 kubectl exec -n $NS "${POD[probe-iot]}" -- \
   iperf3 -c "${IP[probe-edge]}" -u -b 1.2G -t 5 -f m 2>&1 | tail -3 | sed 's/^/    /' || true
 
 echo ""
-echo "iot → cloud (inter-region, 50Mbit cap, 2% loss) :"
+echo "iot → cloud (region_pair: 100Mbit cap, 2% loss — push 200M to exceed cap):"
+echo "  Expected: throughput ≈ 100Mbit, ~50% drops due to tbf shaping."
 kubectl exec -n $NS "${POD[probe-iot]}" -- \
-  iperf3 -c "${IP[probe-cloud]}" -u -b 100M -t 5 -f m 2>&1 | tail -3 | sed 's/^/    /' || true
+  iperf3 -c "${IP[probe-cloud]}" -u -b 200M -t 5 -f m 2>&1 | tail -3 | sed 's/^/    /' || true
 
 # ─── 8. Summary ──────────────────────────────────────────────────
 step "DONE"
