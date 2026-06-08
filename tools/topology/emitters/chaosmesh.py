@@ -58,13 +58,19 @@ def _parse_bits_per_sec(rate: str) -> float:
 
 
 def _to_chaos_rate(bw: str) -> str:
-    """Convert '100Mbit' (topology) → '12.5mbps' (Chaos Mesh)."""
-    bps = _parse_bits_per_sec(bw)
-    mb_per_sec = bps / 8 / 1e6
-    if mb_per_sec >= 1:
-        return f"{mb_per_sec:.4g}mbps"
-    kb_per_sec = bps / 8 / 1e3
-    return f"{kb_per_sec:.4g}kbps"
+    """Convert '100Mbit' (topology) → integer Chaos Mesh rate string.
+
+    Chaos Mesh validates rate.rate via strconv.ParseUint so we MUST emit
+    an integer value. We pick the largest unit (gbps > mbps > kbps > bps)
+    where the value is still an integer ≥ 1.
+    """
+    bytes_per_sec = _parse_bits_per_sec(bw) / 8
+    for unit, divisor in (("gbps", 1e9), ("mbps", 1e6), ("kbps", 1e3), ("bps", 1)):
+        value = bytes_per_sec / divisor
+        if value >= 1 and value == int(value):
+            return f"{int(value)}{unit}"
+    # Fallback: any value as bps (kept as integer; sub-byte rates rounded up)
+    return f"{max(int(bytes_per_sec), 1)}bps"
 
 
 def _has_any(metric: Metric) -> bool:
