@@ -4,17 +4,20 @@ Targets pods via the arena.node label that 1-launch_cluster.sh stamps
 onto every kind node (and that callers are expected to propagate to
 their app pods via the same label, see examples/probes.yaml).
 
-Bandwidth and latency get separate NetworkChaos resources because Chaos
-Mesh treats `bandwidth` and `delay` as different `action` values and a
-single resource can only carry one action. The `loss` action is the
-same — also emitted as its own resource when set.
+We use `action: netem` (composite) when latency / loss / bandwidth need
+to coexist on the same pair. Per Chaos Mesh docs, `action: bandwidth`
+(tbf-backed) is *mutually exclusive* with any netem field, so we route
+all three through netem's built-in `rate` for bandwidth shaping.
 
-`jitter` is folded into the delay resource as Chaos Mesh expects.
+Notes on units:
+- Topology YAML expresses bandwidth in bits/s units (e.g. "100Mbit").
+- Chaos Mesh's `rate.rate` field uses *bytes/s* units (e.g. "mbps" = MB/s).
+  We convert: 100 Mbit/s → 12.5 mbps.
 """
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import yaml
 
@@ -27,7 +30,6 @@ CHAOS_NAMESPACE = "arena-net"
 
 def _name(prefix: str, src_label: str, dst_label: str) -> str:
     raw = f"{prefix}-{src_label}-to-{dst_label}"
-    # K8s metadata.name must be ≤253 chars, [a-z0-9.-], start+end alnum.
     return raw.lower().replace("_", "-")
 
 
@@ -38,106 +40,81 @@ def _selector(label: str) -> Dict:
     }
 
 
-def _bw_limit_bytes(rate: str) -> int:
-    # Crude conversion → bytes for the `limit` (queue depth) field. Chaos
-    # Mesh uses tc's tbf, which needs the limit in bytes. We set ~1s of
-    # rate as the limit so bursts of up to one second can pass through.
-    r = rate.lower()
-    units = {"bit": 1 / 8, "kbit": 125, "mbit": 125_000, "gbit": 125_000_000}
-    for u, factor in sorted(units.items(), key=lambda x: -len(x[0])):
+def _parse_bits_per_sec(rate: str) -> float:
+    """Parse a topology-style rate string like '100Mbit' or '1Gbit' into bits/s."""
+    r = rate.strip().lower()
+    units = {
+        "gbit": 1e9, "gbps": 1e9 * 8,        # Gbps assumed = gigabytes
+        "mbit": 1e6, "mbps": 1e6 * 8,
+        "kbit": 1e3, "kbps": 1e3 * 8,
+        "bit": 1,    "bps":  8,
+    }
+    for u, bits_per_unit in sorted(units.items(), key=lambda x: -len(x[0])):
         if r.endswith(u):
             n = float(r[: -len(u)])
-            return max(int(n * factor), 4096)
-    return 1_000_000  # fallback, 1 MB queue
+            return n * bits_per_unit
+    # Last resort: assume bare number means Mbit
+    return float(r) * 1e6
 
 
-def _delay_resource(link: ResolvedLink, metric: Metric) -> Optional[Dict]:
-    lat = metric.get("latency")
-    if not lat:
+def _to_chaos_rate(bw: str) -> str:
+    """Convert '100Mbit' (topology) → '12.5mbps' (Chaos Mesh)."""
+    bps = _parse_bits_per_sec(bw)
+    mb_per_sec = bps / 8 / 1e6
+    if mb_per_sec >= 1:
+        return f"{mb_per_sec:.4g}mbps"
+    kb_per_sec = bps / 8 / 1e3
+    return f"{kb_per_sec:.4g}kbps"
+
+
+def _has_any(metric: Metric) -> bool:
+    return bool(metric.get("latency") or metric.get("loss") or metric.get("bw"))
+
+
+def _netem_resource(link: ResolvedLink, metric: Metric) -> Optional[Dict]:
+    """One composite NetworkChaos with action=netem combining delay+loss+rate."""
+    if not _has_any(metric):
         return None
-    spec = {
-        "action": "delay",
+
+    spec: Dict = {
+        "action": "netem",
         "mode": "all",
         "selector": _selector(link.src.label),
         "direction": "to",
         "target": {"mode": "all", "selector": _selector(link.dst.label)},
-        "delay": {"latency": lat},
     }
-    if "jitter" in metric:
-        spec["delay"]["jitter"] = metric["jitter"]
+
+    if metric.get("latency"):
+        delay_block: Dict[str, str] = {"latency": metric["latency"]}
+        if metric.get("jitter"):
+            delay_block["jitter"] = metric["jitter"]
+        spec["delay"] = delay_block
+
+    loss = metric.get("loss")
+    if loss is not None and str(loss).rstrip("%") not in ("0", "0.0", ""):
+        spec["loss"] = {"loss": str(loss).rstrip("%"), "correlation": "0"}
+
+    if metric.get("bw"):
+        spec["rate"] = {"rate": _to_chaos_rate(metric["bw"])}
+
     return {
         "apiVersion": "chaos-mesh.org/v1alpha1",
         "kind": "NetworkChaos",
         "metadata": {
-            "name": _name("delay", link.src.label, link.dst.label),
+            "name": _name("netem", link.src.label, link.dst.label),
             "namespace": CHAOS_NAMESPACE,
         },
         "spec": spec,
     }
 
 
-def _bandwidth_resource(link: ResolvedLink, metric: Metric) -> Optional[Dict]:
-    bw = metric.get("bw")
-    if not bw:
-        return None
-    return {
-        "apiVersion": "chaos-mesh.org/v1alpha1",
-        "kind": "NetworkChaos",
-        "metadata": {
-            "name": _name("bw", link.src.label, link.dst.label),
-            "namespace": CHAOS_NAMESPACE,
-        },
-        "spec": {
-            "action": "bandwidth",
-            "mode": "all",
-            "selector": _selector(link.src.label),
-            "direction": "to",
-            "target": {"mode": "all", "selector": _selector(link.dst.label)},
-            "bandwidth": {
-                "rate": bw,
-                "limit": _bw_limit_bytes(bw),
-                "buffer": 10000,
-            },
-        },
-    }
-
-
-def _loss_resource(link: ResolvedLink, metric: Metric) -> Optional[Dict]:
-    loss = metric.get("loss")
-    if not loss:
-        return None
-    # Chaos Mesh expects a percentage as a string like "1" for 1%.
-    pct = str(loss).rstrip("%")
-    if pct in ("0", "0.0"):
-        return None
-    return {
-        "apiVersion": "chaos-mesh.org/v1alpha1",
-        "kind": "NetworkChaos",
-        "metadata": {
-            "name": _name("loss", link.src.label, link.dst.label),
-            "namespace": CHAOS_NAMESPACE,
-        },
-        "spec": {
-            "action": "loss",
-            "mode": "all",
-            "selector": _selector(link.src.label),
-            "direction": "to",
-            "target": {"mode": "all", "selector": _selector(link.dst.label)},
-            "loss": {"loss": pct, "correlation": "25"},
-        },
-    }
-
-
 def emit(links: List[ResolvedLink]) -> List[Dict]:
+    """One composite NetworkChaos per (src, dst) pair (vs. previous 3-per-pair)."""
     out: List[Dict] = []
     for L in links:
-        for r in (
-            _delay_resource(L, L.metric),
-            _bandwidth_resource(L, L.metric),
-            _loss_resource(L, L.metric),
-        ):
-            if r is not None:
-                out.append(r)
+        r = _netem_resource(L, L.metric)
+        if r is not None:
+            out.append(r)
     return out
 
 
