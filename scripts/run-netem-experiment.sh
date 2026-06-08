@@ -119,8 +119,9 @@ echo "NetworkChaos status :"
 kubectl get networkchaos -n $NS
 
 echo ""
-echo "Inspection : tc qdisc inside probe-iot"
-SRC=$(kubectl get pods -n $NS -l app=probe-iot -o jsonpath='{.items[0].metadata.name}')
+echo "Inspection : tc qdisc inside a probe pod (first IoT-tier we find)"
+SRC=$(kubectl get pods -n $NS -l arena.tier=IoT -o jsonpath='{.items[0].metadata.name}' 2>/dev/null \
+      || kubectl get pods -n $NS -o jsonpath='{.items[0].metadata.name}')
 NODE=$(kubectl get pod -n $NS $SRC -o jsonpath='{.spec.nodeName}')
 CID=$(kubectl get pod -n $NS $SRC -o jsonpath='{.status.containerStatuses[0].containerID}' | sed 's|containerd://||')
 PID=$(docker exec $NODE crictl inspect $CID | python3 -c "import json,sys; print(json.load(sys.stdin)['info']['pid'])")
@@ -131,44 +132,48 @@ docker exec $NODE nsenter -t $PID -n tc qdisc show dev eth0 \
 # ─── 6. Run pairwise tests ───────────────────────────────────────
 step "6. Pairwise measurements"
 
-declare -A IP
-for app in probe-iot probe-edge probe-cloud; do
-  IP[$app]=$(kubectl get pod -n $NS -l app=$app -o jsonpath='{.items[0].status.podIP}')
-done
-
-declare -A POD
-for app in probe-iot probe-edge probe-cloud; do
-  POD[$app]=$(kubectl get pods -n $NS -l app=$app -o jsonpath='{.items[0].metadata.name}')
+# Discover one probe per tier dynamically (works for both single-instance
+# and multi-instance topologies)
+declare -A POD IP TIER_NAME
+for tier in IoT Edge Cloud; do
+  POD[$tier]=$(kubectl get pods -n $NS -l arena.tier=$tier -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+  IP[$tier]=$(kubectl get pod -n $NS -l arena.tier=$tier -o jsonpath='{.items[0].status.podIP}' 2>/dev/null || true)
+  TIER_NAME[$tier]=$(kubectl get pod -n $NS -l arena.tier=$tier -o jsonpath='{.items[0].metadata.labels.arena\.node}' 2>/dev/null || true)
+  echo "  $tier tier → ${POD[$tier]} (${TIER_NAME[$tier]} @ ${IP[$tier]})"
 done
 
 run_ping() {
-  local from=$1 to=$2 expected_rtt=$3
-  local result
-  result=$(kubectl exec -n $NS "${POD[probe-$from]}" -- ping -c 30 -i 0.1 "${IP[probe-$to]}" 2>&1 | tail -2)
-  echo "  $from → $to (RTT attendu $expected_rtt ms)"
-  echo "$result" | sed 's/^/    /'
+  local from_tier=$1 to_tier=$2
+  if [[ -z "${POD[$from_tier]:-}" || -z "${IP[$to_tier]:-}" ]]; then
+    echo "  (skip $from_tier → $to_tier : tier missing)"
+    return
+  fi
+  echo "  ${TIER_NAME[$from_tier]} → ${TIER_NAME[$to_tier]}"
+  kubectl exec -n $NS "${POD[$from_tier]}" -- ping -c 30 -i 0.1 "${IP[$to_tier]}" 2>&1 \
+    | tail -2 | sed 's/^/    /'
 }
 
-run_ping iot   edge   "4"     # exception 2ms × 2
-run_ping iot   cloud  "60"    # inter-region 30ms × 2
-run_ping edge  iot    "4"
-run_ping edge  cloud  "60"
-run_ping cloud iot    "60"
-run_ping cloud edge   "60"
+run_ping IoT   Edge
+run_ping IoT   Cloud
+run_ping Edge  IoT
+run_ping Edge  Cloud
+run_ping Cloud IoT
+run_ping Cloud Edge
 
-# ─── 7. Bandwidth check (UDP since TCP can't handle loss+delay) ──
-step "7. Bandwidth check (UDP — TCP collapses under loss+delay)"
-echo "iot → edge (exception: 1Gbit, 0% loss — push 1.2G):"
-echo "  Note: iperf3 single-thread UDP plateaus around ~500-600 Mbit/s (CPU-bound)."
-echo "        The 1Gbit tbf cap is therefore not reached."
-kubectl exec -n $NS "${POD[probe-iot]}" -- \
-  iperf3 -c "${IP[probe-edge]}" -u -b 1.2G -t 5 -f m 2>&1 | tail -3 | sed 's/^/    /' || true
+# ─── 7. Bandwidth check (UDP — TCP collapses under loss+delay) ──
+step "7. Bandwidth check"
+if [[ -n "${POD[IoT]:-}" && -n "${IP[Edge]:-}" ]]; then
+  echo "${TIER_NAME[IoT]} → ${TIER_NAME[Edge]} UDP (push 200M):"
+  kubectl exec -n $NS "${POD[IoT]}" -- \
+    iperf3 -c "${IP[Edge]}" -u -b 200M -t 5 -f m 2>&1 | tail -3 | sed 's/^/    /' || true
+fi
 
-echo ""
-echo "iot → cloud (region_pair: 100Mbit cap, 2% loss — push 200M to exceed cap):"
-echo "  Expected: throughput ≈ 100Mbit, ~50% drops due to tbf shaping."
-kubectl exec -n $NS "${POD[probe-iot]}" -- \
-  iperf3 -c "${IP[probe-cloud]}" -u -b 200M -t 5 -f m 2>&1 | tail -3 | sed 's/^/    /' || true
+if [[ -n "${POD[Edge]:-}" && -n "${IP[Cloud]:-}" ]]; then
+  echo ""
+  echo "${TIER_NAME[Edge]} → ${TIER_NAME[Cloud]} TCP (4 threads, see effective cap):"
+  kubectl exec -n $NS "${POD[Edge]}" -- \
+    iperf3 -c "${IP[Cloud]}" -P 4 -t 5 -f g 2>&1 | tail -7 | sed 's/^/    /' || true
+fi
 
 # ─── 8. Summary ──────────────────────────────────────────────────
 step "DONE"
