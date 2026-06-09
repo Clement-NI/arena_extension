@@ -81,13 +81,13 @@ def _deploy(name: str, label: str, tier: str, node_name: str) -> Dict:
                             "resources": {
                                 "requests": {
                                     "cpu": "50m",
-                                    "memory": "32Mi",
-                                    "ephemeral-storage": "50Mi",
+                                    "memory": "64Mi",
+                                    "ephemeral-storage": "100Mi",
                                 },
                                 "limits": {
-                                    "cpu": "200m",
-                                    "memory": "128Mi",
-                                    "ephemeral-storage": "100Mi",
+                                    "cpu": "500m",
+                                    "memory": "256Mi",
+                                    "ephemeral-storage": "200Mi",
                                 },
                             },
                         }
