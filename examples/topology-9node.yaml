@@ -1,17 +1,18 @@
-# Arena 9-node topology
+# Arena 9-node topology (hierarchical, ≤7 rules per pod)
 # ─────────────────────────────────────────────────────────────────
-# Architecture : 3-tier full-mesh IoT-Edge-Cloud
-#   IoT-1, IoT-2, IoT-3       (sensors, low-resource)
-#   Edge-1, Edge-2, Edge-3    (edge gateways, mid-resource)
-#   Cloud-1, Cloud-2, Cloud-3 (cloud servers, high-resource)
+# Chaos Mesh's chaos-daemon caps at ~7 netem rules per pod's egress.
+# Beyond that, the tc tree build fails with "Specified class not
+# found" (off-by-one in the daemon's prio qdisc allocation).
 #
-# Connectivity matrix :
-#   IoT  ↔ IoT     : direct (intra-region, fast LAN)
-#   IoT  ↔ Edge    : 5G urban (mid-latency, mid-bw)
-#   Edge ↔ Edge    : direct (intra-region, fast LAN)
-#   Edge ↔ Cloud   : fiber (low-latency, high-bw)
-#   Cloud↔ Cloud   : direct (intra-region, fast LAN)
-#   IoT  ↔ Cloud   : no direct path (uses inter-region default = degraded)
+# Realistic computing-continuum traffic is HIERARCHICAL :
+#   IoT  ↔ IoT      (intra-region peer discovery)
+#   IoT  ↔ Edge     (sensor → gateway uplink)
+#   Edge ↔ Edge     (gateway peer)
+#   Edge ↔ Cloud    (gateway → backend)
+#   Cloud↔ Cloud    (backend HA / peer)
+#
+# Notably : IoT ↔ Cloud is NOT a direct path — traffic goes via Edge.
+# This is both realistic AND keeps each pod ≤ 7 outgoing rules.
 # ─────────────────────────────────────────────────────────────────
 
 version: "1"
@@ -27,29 +28,30 @@ defaults:
     bw: 1Gbit
     loss: "0"
   inter-region:
-    # Default = unreachable-ish path (used for IoT↔Cloud).
-    # Showcases what happens when no direct route exists.
-    latency: 300ms
-    bw: 1Mbit
-    loss: "10"
+    # No direct path declared. Pairs not listed below inherit this.
+    # We mark them as "partition-like" (extreme degradation).
+    latency: 999ms
+    bw: 100kbit
+    loss: "30"
 
 region_pairs:
-  # IoT  ↔ Edge : 5G urban
+  # IoT ↔ Edge : 5G urbain
   - { from: iot,  to: edge,  latency: 15ms, bw: 200Mbit, loss: "0.5" }
   - { from: edge, to: iot,   latency: 15ms, bw: 200Mbit, loss: "0.5" }
 
-  # Edge ↔ Cloud : fiber datacenter
+  # Edge ↔ Cloud : fibre datacenter
   - { from: edge,  to: cloud, latency: 5ms,  bw: 10Gbit, loss: "0" }
   - { from: cloud, to: edge,  latency: 5ms,  bw: 10Gbit, loss: "0" }
 
-# Per-node fine-tuning
-exceptions:
-  # IoT-1 and Edge-1 are in the same building (rare best-case link)
-  - { from: IoT-1, to: Edge-1, latency: 1ms, bw: 1Gbit, loss: "0" }
-  - { from: Edge-1, to: IoT-1, latency: 1ms, bw: 1Gbit, loss: "0" }
+  # PAS de iot ↔ cloud direct → utilise les defaults inter-region "partition-like"
 
-  # Cloud-1 ↔ Cloud-2 is an HA pair (lowest latency)
+exceptions:
+  # Same-building : IoT-1 et Edge-1 voisins
+  - { from: IoT-1,  to: Edge-1, latency: 1ms, bw: 1Gbit, loss: "0" }
+  - { from: Edge-1, to: IoT-1,  latency: 1ms, bw: 1Gbit, loss: "0" }
+
+  # HA pair : Cloud-1 et Cloud-2
   - { from: Cloud-1, to: Cloud-2, latency: 0.2ms, bw: 10Gbit, loss: "0" }
   - { from: Cloud-2, to: Cloud-1, latency: 0.2ms, bw: 10Gbit, loss: "0" }
 
-symmetric: false   # we set both directions explicitly above
+symmetric: false
