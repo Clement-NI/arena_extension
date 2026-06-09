@@ -27,7 +27,7 @@ import yaml
 
 from ..model import Topology
 
-PROBE_IMAGE = "alpine:3.19"
+PROBE_IMAGE = "mirror.gcr.io/library/alpine:3.19"
 PROBE_NAMESPACE = "arena-net"
 PROBE_INIT = (
     "apk add --no-cache iperf3 iproute2 iputils >/dev/null 2>&1; "
