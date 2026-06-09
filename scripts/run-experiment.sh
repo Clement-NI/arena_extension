@@ -317,9 +317,13 @@ verify_delay() {
 
 verify_bw() {
   local src=$1 dst=$2 expected=$3
+  # -P 8: 8 parallel TCP streams (one stream cannot fill a high-BDP pipe;
+  # a single TCP at 90ms RTT tops out at ~10 Mbit/s regardless of the
+  # actual shaper limit). 8 streams ≈ 8× more throughput → realistic.
   local actual=$(kubectl exec -n arena-net deploy/probe-$src -- \
-    iperf3 -c "${POD_IP[$dst]}" -t 6 -f m 2>/dev/null | awk '/sender/{print $7" "$8}' | tail -1)
-  printf "    %-15s expected=%-10s   actual=%s\n" \
+    iperf3 -c "${POD_IP[$dst]}" -t 8 -P 8 -f m 2>/dev/null | \
+    awk '/\[SUM\].*sender/{print $6" "$7}')
+  printf "    %-15s expected=%-12s   actual=%s\n" \
     "$src→$dst" "$expected" "${actual:-?}" | tee -a "$LOG_DIR/run.log"
 }
 
