@@ -11,8 +11,10 @@ all three through netem's built-in `rate` for bandwidth shaping.
 
 Notes on units:
 - Topology YAML expresses bandwidth in bits/s units (e.g. "100Mbit").
-- Chaos Mesh's `rate.rate` field uses *bytes/s* units (e.g. "mbps" = MB/s).
-  We convert: 100 Mbit/s → 12.5 mbps.
+- We emit Chaos Mesh `rate.rate` in bits/s units too (`mbit`/`gbit`),
+  not bytes/s (`kbps`/`mbps`), because the bytes/s suffixes have
+  conflicting interpretations across tc and the iperf3 ecosystem and
+  observably produced ~5× wrong shaper values.
 """
 
 from __future__ import annotations
@@ -60,17 +62,23 @@ def _parse_bits_per_sec(rate: str) -> float:
 def _to_chaos_rate(bw: str) -> str:
     """Convert '100Mbit' (topology) → integer Chaos Mesh rate string.
 
+    Emits bits/s units (`mbit`/`gbit`/`kbit`/`bit`) which tc / chaos-mesh
+    both parse unambiguously. We avoid bytes/s units (`kbps`, `mbps`)
+    because their interpretation differs between tools (tc treats `kbps`
+    as kilo-BYTES while iperf3 etc. use kilo-BITS), which produced wrong
+    shaper values in practice.
+
     Chaos Mesh validates rate.rate via strconv.ParseUint so we MUST emit
-    an integer value. We pick the largest unit (gbps > mbps > kbps > bps)
-    where the value is still an integer ≥ 1.
+    an integer. We pick the largest unit (gbit > mbit > kbit > bit) where
+    the value is still an integer ≥ 1.
     """
-    bytes_per_sec = _parse_bits_per_sec(bw) / 8
-    for unit, divisor in (("gbps", 1e9), ("mbps", 1e6), ("kbps", 1e3), ("bps", 1)):
-        value = bytes_per_sec / divisor
+    bits_per_sec = _parse_bits_per_sec(bw)
+    for unit, divisor in (("gbit", 1e9), ("mbit", 1e6), ("kbit", 1e3), ("bit", 1)):
+        value = bits_per_sec / divisor
         if value >= 1 and value == int(value):
             return f"{int(value)}{unit}"
-    # Fallback: any value as bps (kept as integer; sub-byte rates rounded up)
-    return f"{max(int(bytes_per_sec), 1)}bps"
+    # Fallback: any value as bit (kept as integer; sub-bit rates rounded up)
+    return f"{max(int(bits_per_sec), 1)}bit"
 
 
 def _has_any(metric: Metric) -> bool:
