@@ -1,12 +1,22 @@
 """Emit one Deployment + Service per worker node.
 
-Each probe pod gets the same arena.tier / arena.node labels its host
-node carries, so Chaos Mesh selectors written against arena.node match
-both the pod and the placement intent. Pinned via nodeSelector to its
-target node by name (Arena's testbed-role label).
+Probe pods are lightweight Alpine containers (~5 MB base image) that
+install iperf3 + ping + tc at startup via apk (~20 MB extra). Total
+disk footprint per pod : ~25 MB compressed.
 
-The probe image (networkstatic/iperf3) runs iperf3 server + sleep; the
-verify script reuses it as both server and client.
+Resource limits are enforced on every probe so a probe pod cannot
+balloon and cause node eviction under disk/memory pressure :
+  - CPU      :  50m request, 200m limit
+  - memory   :  32Mi request, 128Mi limit
+  - storage  :  100Mi ephemeral-storage limit
+
+The container runs an iperf3 server on port 5201 + sleep infinity, so
+the verify script can reuse it as both server and client.
+
+Labels propagated on every pod (matched by Chaos Mesh selectors):
+  - app          : probe-<label>
+  - arena.tier   : IoT | Edge | Cloud
+  - arena.node   : lowercase label (e.g. iot-1)
 """
 
 from __future__ import annotations
@@ -17,8 +27,13 @@ import yaml
 
 from ..model import Topology
 
-PROBE_IMAGE = "networkstatic/iperf3"
+PROBE_IMAGE = "alpine:3.19"
 PROBE_NAMESPACE = "arena-net"
+PROBE_INIT = (
+    "apk add --no-cache iperf3 iproute2 iputils >/dev/null 2>&1; "
+    "iperf3 -s -p 5201 & "
+    "sleep infinity"
+)
 
 
 def _ns() -> Dict:
@@ -61,12 +76,20 @@ def _deploy(name: str, label: str, tier: str, node_name: str) -> Dict:
                         {
                             "name": "probe",
                             "image": PROBE_IMAGE,
-                            "command": [
-                                "sh",
-                                "-c",
-                                "iperf3 -s -p 5201 & sleep infinity",
-                            ],
+                            "command": ["sh", "-c", PROBE_INIT],
                             "ports": [{"containerPort": 5201}],
+                            "resources": {
+                                "requests": {
+                                    "cpu": "50m",
+                                    "memory": "32Mi",
+                                    "ephemeral-storage": "50Mi",
+                                },
+                                "limits": {
+                                    "cpu": "200m",
+                                    "memory": "128Mi",
+                                    "ephemeral-storage": "100Mi",
+                                },
+                            },
                         }
                     ],
                 },
