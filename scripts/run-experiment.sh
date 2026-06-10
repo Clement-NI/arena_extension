@@ -73,7 +73,19 @@ step "1. Preflight"
 [[ $(id -u) -eq 0 ]] || fail "must run as root (sudo)"
 CGROUP=$(stat -fc %T /sys/fs/cgroup)
 [[ "$CGROUP" == "cgroup2fs" ]] || fail "host is on $CGROUP — need cgroup v2 (reboot with systemd.unified_cgroup_hierarchy=1)"
-ok "root, cgroup v2 ($CGROUP)"
+
+# Kernel limits: 7 kind nodes × kubelet + containerd + many file watchers
+# easily exhaust the default fs.inotify limits. Bump them or kubelet on
+# some workers will die with "inotify_init: too many open files".
+sysctl -w fs.inotify.max_user_instances=8192   >/dev/null
+sysctl -w fs.inotify.max_user_watches=524288   >/dev/null
+sysctl -w fs.file-max=2097152                  >/dev/null
+cat <<EOF > /etc/sysctl.d/99-arena-inotify.conf
+fs.inotify.max_user_instances=8192
+fs.inotify.max_user_watches=524288
+fs.file-max=2097152
+EOF
+ok "root, cgroup v2 ($CGROUP), inotify limits bumped (8192 instances, 524288 watches)"
 
 # ───────────────────────────────────────────────────────────────
 # 2. Base packages (docker, jq, python3-yaml, build tools)
