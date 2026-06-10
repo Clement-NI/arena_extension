@@ -282,12 +282,34 @@ done
 # 12. Baseline (no chaos applied yet)
 # ───────────────────────────────────────────────────────────────
 
-step "12. Baseline RTT (chaos NOT applied)"
+step "12. Baseline (chaos NOT applied — natural cluster performance)"
+
+echo "  ───── RTT baseline (expect < 1 ms intra-host) ─────"  | tee -a "$LOG_DIR/run.log"
 for pair in "iot-1:edge-1" "iot-1:cloud" "iot-1:iot-2"; do
   IFS=: read src dst <<< "$pair"
   rtt=$(kubectl exec -n arena-net deploy/probe-$src -- \
     ping -c 5 -q "${POD_IP[$dst]}" 2>/dev/null | awk -F'/' '/^rtt/{print $5}')
-  printf "    %-15s baseline RTT = %s ms\n" "$src→$dst" "${rtt:-?}" | tee -a "$LOG_DIR/run.log"
+  printf "    %-15s baseline RTT  = %s ms\n" "$src→$dst" "${rtt:-?}" | tee -a "$LOG_DIR/run.log"
+done
+
+echo                                                          | tee -a "$LOG_DIR/run.log"
+echo "  ───── Bandwidth baseline (iperf3 TCP -P 8, max the pod CPU can push) ─────" | tee -a "$LOG_DIR/run.log"
+for pair in "iot-1:edge-1" "iot-1:cloud" "iot-1:iot-2"; do
+  IFS=: read src dst <<< "$pair"
+  bw=$(kubectl exec -n arena-net deploy/probe-$src -- \
+    iperf3 -c "${POD_IP[$dst]}" -t 5 -P 8 -f m 2>/dev/null | \
+    awk '/\[SUM\].*sender/{print $6" "$7}')
+  printf "    %-15s baseline BW   = %s\n" "$src→$dst" "${bw:-?}" | tee -a "$LOG_DIR/run.log"
+done
+
+echo                                                          | tee -a "$LOG_DIR/run.log"
+echo "  ───── Loss baseline (iperf3 UDP @ 100 Mbit/s, expect 0%) ─────" | tee -a "$LOG_DIR/run.log"
+for pair in "iot-1:edge-1" "iot-1:cloud" "iot-1:iot-2"; do
+  IFS=: read src dst <<< "$pair"
+  loss=$(kubectl exec -n arena-net deploy/probe-$src -- \
+    iperf3 -u -c "${POD_IP[$dst]}" -b 100M -t 5 2>/dev/null | \
+    grep -oE '\([0-9.]+%\)' | tail -1)
+  printf "    %-15s baseline loss = %s\n" "$src→$dst" "${loss:-?}" | tee -a "$LOG_DIR/run.log"
 done
 
 # ───────────────────────────────────────────────────────────────
