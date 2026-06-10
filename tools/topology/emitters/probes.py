@@ -4,10 +4,11 @@ Probe pods are lightweight Alpine containers (~5 MB base image) that
 install iperf3 + ping + tc at startup via apk (~20 MB extra). Total
 disk footprint per pod : ~25 MB compressed.
 
-Resource limits are enforced on every probe so a probe pod cannot
-balloon and cause node eviction under disk/memory pressure :
-  - CPU      :  50m request, 200m limit
-  - memory   :  32Mi request, 128Mi limit
+Resource limits sized so a single probe can saturate a multi-Gbit/s
+UDP shaper without being CPU-bound (with 500m the receiver caps at
+~110 Mbit/s UDP regardless of the configured rate):
+  - CPU      :  100m request, 2000m limit (≈ 2 cores burst)
+  - memory   :  128Mi request, 512Mi limit
   - storage  :  100Mi ephemeral-storage limit
 
 The container runs an iperf3 server on port 5201 + sleep infinity, so
@@ -80,13 +81,13 @@ def _deploy(name: str, label: str, tier: str, node_name: str) -> Dict:
                             "ports": [{"containerPort": 5201}],
                             "resources": {
                                 "requests": {
-                                    "cpu": "50m",
-                                    "memory": "64Mi",
+                                    "cpu": "100m",
+                                    "memory": "128Mi",
                                     "ephemeral-storage": "100Mi",
                                 },
                                 "limits": {
-                                    "cpu": "500m",
-                                    "memory": "256Mi",
+                                    "cpu": "2000m",
+                                    "memory": "512Mi",
                                     "ephemeral-storage": "200Mi",
                                 },
                             },
