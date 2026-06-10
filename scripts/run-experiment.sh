@@ -215,11 +215,20 @@ ok "capacity OK: ${SUM_CPU}/${HOST_CPU} CPU requested"
 
 cp "$NODES_JSON" arena_testbed/nodes.json
 
-# If a cluster already exists from a previous run, delete it for a fresh launch
+# If a cluster exists or zombie containers/networks from a previous run
+# remain, nuke them. `kind delete` alone often misses orphans, and the
+# next `kind create` then dies with "container name already in use".
 if kind get clusters 2>/dev/null | grep -q '^arena-testbed$'; then
   warn "previous arena-testbed cluster found, deleting first..."
   bash arena_testbed/3-clean_cluster.sh >>"$LOG_DIR/cleanup.log" 2>&1 || true
 fi
+ZOMBIES=$(docker ps -aq --filter "label=io.x-k8s.kind.cluster=arena-testbed" 2>/dev/null)
+if [[ -n "$ZOMBIES" ]]; then
+  warn "removing $(echo "$ZOMBIES" | wc -l) zombie kind container(s) from a previous run..."
+  docker rm -f $ZOMBIES >>"$LOG_DIR/cleanup.log" 2>&1 || true
+fi
+docker network ls --format '{{.Name}}' | grep -qx kind && \
+  docker network rm kind >>"$LOG_DIR/cleanup.log" 2>&1 || true
 
 bash arena_testbed/1-launch_cluster.sh >"$LOG_DIR/launch.log" 2>&1 || \
   fail "cluster launch failed, check $LOG_DIR/launch.log"
