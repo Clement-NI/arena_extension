@@ -362,19 +362,30 @@ verify_bw() {
   local src=$1 dst=$2 expected=$3
   local per_stream=$(( expected * 11 / 10 / 4 ))M
 
-  local dst_ip
-  dst_ip=$(kubectl get pod -n arena-net -l arena.node=$dst \
-           -o jsonpath='{.items[0].status.podIP}' 2>/dev/null)
-  [ -z "$dst_ip" ] && { echo "    $src→$dst  ERR"; return; }
+  # Use the same POD_IP[] array as verify_delay / verify_loss (filled at
+  # step 11). Avoids relying on a second `kubectl get pod -l arena.node=...`
+  # query that returned empty in some runs, causing iperf3 to DNS-resolve
+  # an empty hostname and report "Name does not resolve".
+  local dst_ip="${POD_IP[$dst]:-}"
+  if [ -z "$dst_ip" ]; then
+    echo "    $src→$dst  ERR: POD_IP[$dst] is empty (probe pod not Ready?)"
+    return
+  fi
 
   # -w 16M = 16MB socket buffer (sender + receiver)
   # -P 4 = 4 streams
   local outfile="$LOG_DIR/iperf3-${src}-to-${dst}.json"
   kubectl exec -n arena-net deploy/probe-$src -- \
     iperf3 -c "$dst_ip" -u -b "$per_stream" -l 1400 -w 16M -t 10 -O 2 -P 4 -J >"$outfile" 2>&1
-  if ! jq -e '.end' "$outfile" >/dev/null 2>&1; then
-    local snippet; snippet=$(head -c 160 "$outfile" | tr '\n' ' ')
-    echo "    $src→$dst  ERR: ${snippet:-no output} (see $outfile)"
+
+  # iperf3 always writes JSON (even on error). Detect failure by .error key.
+  local iperf_err; iperf_err=$(jq -r '.error // empty' "$outfile" 2>/dev/null)
+  if [ -n "$iperf_err" ]; then
+    echo "    $src→$dst  ERR: $iperf_err (see $outfile)"
+    return
+  fi
+  if ! jq -e '.end.sum' "$outfile" >/dev/null 2>&1; then
+    echo "    $src→$dst  ERR: malformed iperf3 JSON (see $outfile)"
     return
   fi
 
