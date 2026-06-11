@@ -359,15 +359,29 @@ verify_delay() {
 }
 
 verify_bw() {
-  local src=$1 dst=$2 expected=$3
-  # -P 8: 8 parallel TCP streams (one stream cannot fill a high-BDP pipe;
-  # a single TCP at 90ms RTT tops out at ~10 Mbit/s regardless of the
-  # actual shaper limit). 8 streams ≈ 8× more throughput → realistic.
-  local actual=$(kubectl exec -n arena-net deploy/probe-$src -- \
-    iperf3 -c "${POD_IP[$dst]}" -t 8 -P 8 -f m 2>/dev/null | \
-    awk '/\[SUM\].*sender/{print $6" "$7}')
-  printf "    %-15s expected=%-12s   actual=%s\n" \
-    "$src→$dst" "$expected" "${actual:-?}" | tee -a "$LOG_DIR/run.log"
+  # UDP shaper verification — Chaos Mesh applies netem on the sender's
+  # egress qdisc, so the receiver-side throughput == the sender's enforced
+  # rate cap. We push 1.1× the configured rate across 4 parallel streams
+  # and read the per-receiver bitrate from iperf3's JSON output.
+  local src=$1 dst=$2 cfg=$3   # cfg is integer Mbit/s, e.g. "1000"
+  local per_stream=$(( cfg * 11 / 10 / 4 ))M
+
+  local json
+  json=$(kubectl exec -n arena-net deploy/probe-$src -- \
+    iperf3 -c "${POD_IP[$dst]}" -u -b "$per_stream" -l 1400 -w 16M -t 10 -O 2 -P 4 -J 2>/dev/null)
+
+  local line
+  if [[ -z "$json" ]]; then
+    line=$(printf "    %-15s configured=%-9s   ERR (iperf3 no output)" "$src→$dst" "${cfg}Mbit")
+  else
+    line=$(echo "$json" | jq -r --arg src "$src" --arg dst "$dst" --arg cfg "$cfg" '
+      (.end.sum_received.bits_per_second
+       // (.end.sum.bits_per_second * (1 - .end.sum.lost_percent/100))) as $shaped |
+      (.end.sum.bits_per_second) as $pushed |
+      "    \($src)→\($dst)   configured=\($cfg)Mbit   sender_egress_actual=\($shaped/1e6|floor)Mbit   (pushed=\($pushed/1e6|floor)Mbit, drop=\(.end.sum.lost_percent|floor)%)"
+    ')
+  fi
+  echo "$line" | tee -a "$LOG_DIR/run.log"
 }
 
 verify_loss() {
@@ -386,10 +400,10 @@ verify_delay iot-2 cloud  45  "west → central"
 verify_delay iot-1 iot-2  70  "east → west"
 
 echo                                                                       | tee -a "$LOG_DIR/run.log"
-echo "  ───── BANDWIDTH (iperf3 TCP, may be lower than declared due to TCP BDP) ─────" | tee -a "$LOG_DIR/run.log"
-verify_bw iot-1 edge-1 "≈ 1 Gbit/s"
-verify_bw iot-2 cloud  "≈ 500 Mbit/s"
-verify_bw iot-1 iot-2  "≈ 100 Mbit/s"
+echo "  ───── BANDWIDTH (UDP, reports sender-egress shaper actual cap) ─────" | tee -a "$LOG_DIR/run.log"
+verify_bw iot-1 edge-1 1000
+verify_bw iot-2 cloud   500
+verify_bw iot-1 iot-2   100
 
 echo                                                                       | tee -a "$LOG_DIR/run.log"
 echo "  ───── LOSS (iperf3 UDP one-way @ 5 Mbit/s) ─────"                  | tee -a "$LOG_DIR/run.log"
