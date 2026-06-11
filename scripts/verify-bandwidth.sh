@@ -57,20 +57,9 @@ for pod in $(kubectl get pods -n "$NS" -l app -o jsonpath='{.items[*].metadata.l
 done
 
 verify_bw() {
-  local src=$1 dst=$2 cfg=$3   # cfg = integer Mbit/s
+  local src=$1 dst=$2 cfg=$3 cfg_loss=$4   # cfg_loss as string, e.g. "0", "0.5"
   [[ "$cfg" -le 0 ]] && return
 
-  local per_stream
-  local parallel
-  # 高带宽下单 pod userspace UDP 单线程顶 ~140 Mbit。≥500 Mbit/s 用 8 流
-  # 让每流压力降到 ~150 Mbit，避免 sender CPU 成为新瓶颈。
-  if [ "$cfg" -ge 500 ]; then
-    parallel=8
-    per_stream=$(( cfg * 11 / 10 / 8 ))M
-  else
-    parallel=4
-    per_stream=$(( cfg * 11 / 10 / 4 ))M
-  fi
   local dst_ip="${POD_IP[$dst]:-}"
   if [ -z "$dst_ip" ]; then
     printf "  %-22s  ERR: POD_IP[%s] empty (probe pod not Ready?)\n" "$src→$dst" "$dst"
@@ -79,21 +68,41 @@ verify_bw() {
 
   local outfile="$OUT_DIR/iperf3-${src}-to-${dst}.json"
   local errfile="$OUT_DIR/iperf3-${src}-to-${dst}.err"
-  kubectl exec -n "$NS" "deploy/probe-$src" -- \
-    iperf3 -c "$dst_ip" -u -b "$per_stream" -l 1200 \
-           -t 10 -O 2 -P "$parallel" -J >"$outfile" 2>"$errfile" || true
+  local proto
+
+  # 0% loss → TCP can saturate shaper (gives near wire-speed via kernel
+  # pacing + GSO). Lossy links → must use UDP (TCP is Mathis-bounded at
+  # ~MSS/(RTT·√p), produces numbers far below the shaper cap).
+  if [[ "${cfg_loss:-0}" == "0" || "${cfg_loss:-0}" == "0.0" || -z "$cfg_loss" ]]; then
+    proto=TCP
+    kubectl exec -n "$NS" "deploy/probe-$src" -- \
+      iperf3 -c "$dst_ip" -t 10 -O 2 -P 8 -J \
+        >"$outfile" 2>"$errfile" || true
+  else
+    proto=UDP
+    local per_stream parallel
+    if [ "$cfg" -ge 500 ]; then
+      parallel=8; per_stream=$(( cfg * 11 / 10 / 8 ))M
+    else
+      parallel=4; per_stream=$(( cfg * 11 / 10 / 4 ))M
+    fi
+    kubectl exec -n "$NS" "deploy/probe-$src" -- \
+      iperf3 -c "$dst_ip" -u -b "$per_stream" -l 1200 \
+             -t 10 -O 2 -P "$parallel" -J >"$outfile" 2>"$errfile" || true
+  fi
 
   local iperf_err; iperf_err=$(jq -r '.error // empty' "$outfile" 2>/dev/null)
   if [ -n "$iperf_err" ]; then
-    printf "  %-22s  ERR: %s\n" "$src→$dst" "$iperf_err"
+    printf "  %-22s [%s] ERR: %s\n" "$src→$dst" "$proto" "$iperf_err"
     return
   fi
-  if ! jq -e '.end.sum' "$outfile" >/dev/null 2>&1; then
-    printf "  %-22s  ERR: malformed iperf3 JSON (see %s)\n" "$src→$dst" "$outfile"
+  if ! jq -e '.end.sum_received // .end.sum' "$outfile" >/dev/null 2>&1; then
+    printf "  %-22s [%s] ERR: malformed iperf3 JSON (see %s)\n" "$src→$dst" "$proto" "$outfile"
     return
   fi
 
-  jq -r --arg src "$src" --arg dst "$dst" --arg cfg "$cfg" --arg tol "$TOLERANCE" '
+  jq -r --arg src "$src" --arg dst "$dst" --arg cfg "$cfg" \
+        --arg tol "$TOLERANCE" --arg proto "$proto" '
     (.end.sum_received.bits_per_second // 0) as $recv_raw |
     (.end.sum.bits_per_second // 0)          as $sent |
     (.end.sum.lost_percent // 0)             as $loss |
@@ -103,19 +112,19 @@ verify_bw() {
     (($cfg|tonumber) - $shaped_mbit) as $delta |
     (if $delta < 0 then -$delta else $delta end / ($cfg|tonumber) * 100) as $diff_pct |
     (if $diff_pct <= ($tol|tonumber) then "OK" else "FAIL" end) as $status |
-    "  \($src)→\($dst)  configured=\($cfg)Mbit  sender_egress=\($shaped_mbit|floor)Mbit  pushed=\($sent/1e6|floor)Mbit  drop=\($loss|floor)%  diff=\($diff_pct*10|floor/10)%  \($status)"
+    "  \($src)→\($dst) [\($proto)]  configured=\($cfg)Mbit  shaper_actual=\($shaped_mbit|floor)Mbit  pushed=\($sent/1e6|floor)Mbit  drop=\($loss|floor)%  diff=\($diff_pct*10|floor/10)%  \($status)"
   ' "$outfile"
 }
 
 # Drive every pair from the resolved topology matrix
 MATRIX=$(python3 -m tools.topology.cli -t "$TOPO" -n "$NODES" preview)
 
-echo "═══ BANDWIDTH (UDP, sender-egress shaper cap; tolerance ±${TOLERANCE}%) ═══"
+echo "═══ BANDWIDTH (TCP for 0% loss / UDP for lossy; sender-egress shaper cap; tolerance ±${TOLERANCE}%) ═══"
 echo "$MATRIX" | tail -n +2 | while IFS=, read -r src dst latency bw loss jitter layers; do
   [[ -z "$src" || "$src" == "$dst" ]] && continue
   cfg_mbit=$(_bw_to_mbit "$bw")
   [[ "$cfg_mbit" -le 0 ]] && continue
-  verify_bw "${src,,}" "${dst,,}" "$cfg_mbit"
+  verify_bw "${src,,}" "${dst,,}" "$cfg_mbit" "$loss"
 done
 
 echo
