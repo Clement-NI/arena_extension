@@ -359,29 +359,27 @@ verify_delay() {
 }
 
 verify_bw() {
-  # UDP shaper verification — Chaos Mesh applies netem on the sender's
-  # egress qdisc, so the receiver-side throughput == the sender's enforced
-  # rate cap. We push 1.1× the configured rate across 4 parallel streams
-  # and read the per-receiver bitrate from iperf3's JSON output.
-  local src=$1 dst=$2 cfg=$3   # cfg is integer Mbit/s, e.g. "1000"
-  local per_stream=$(( cfg * 11 / 10 / 4 ))M
+  local src=$1 dst=$2 expected=$3
+  local per_stream=$(( expected * 11 / 10 / 4 ))M   
 
+  local dst_ip
+  dst_ip=$(kubectl get pod -n arena-net -l arena.node=$dst \
+           -o jsonpath='{.items[0].status.podIP}' 2>/dev/null)
+  [ -z "$dst_ip" ] && { echo "    $src→$dst  ERR"; return; }
+
+  # -w 16M = 16MB socket buffer (sender + receiver)
+  # -P 4 = 4 streams
   local json
   json=$(kubectl exec -n arena-net deploy/probe-$src -- \
-    iperf3 -c "${POD_IP[$dst]}" -u -b "$per_stream" -l 1400 -w 16M -t 10 -O 2 -P 4 -J 2>/dev/null)
+    iperf3 -c "$dst_ip" -u -b "$per_stream" -l 1400 -w 16M -t 10 -O 2 -P 4 -J 2>/dev/null)
+  [ -z "$json" ] && { echo "    $src→$dst  ERR: 无输出"; return; }
 
-  local line
-  if [[ -z "$json" ]]; then
-    line=$(printf "    %-15s configured=%-9s   ERR (iperf3 no output)" "$src→$dst" "${cfg}Mbit")
-  else
-    line=$(echo "$json" | jq -r --arg src "$src" --arg dst "$dst" --arg cfg "$cfg" '
-      (.end.sum_received.bits_per_second
-       // (.end.sum.bits_per_second * (1 - .end.sum.lost_percent/100))) as $shaped |
-      (.end.sum.bits_per_second) as $pushed |
-      "    \($src)→\($dst)   configured=\($cfg)Mbit   sender_egress_actual=\($shaped/1e6|floor)Mbit   (pushed=\($pushed/1e6|floor)Mbit, drop=\(.end.sum.lost_percent|floor)%)"
-    ')
-  fi
-  echo "$line" | tee -a "$LOG_DIR/run.log"
+  echo "$json" | jq -r --arg src "$src" --arg dst "$dst" --arg exp "$expected" '
+    (.end.sum_received.bits_per_second
+     // (.end.sum.bits_per_second * (1 - .end.sum.lost_percent/100))) as $recv |
+    (.end.sum.bits_per_second) as $sent |
+    "    \($src)→\($dst)  expected=\($exp)Mbit  sent=\($sent/1e6|floor)Mbit  received=\($recv/1e6|floor)Mbit  drop=\(.end.sum.lost_percent|floor)%"
+  '
 }
 
 verify_loss() {
