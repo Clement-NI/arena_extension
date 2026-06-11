@@ -160,20 +160,71 @@ run_ping Edge  Cloud
 run_ping Cloud IoT
 run_ping Cloud Edge
 
-# ─── 7. Bandwidth check (UDP — TCP collapses under loss+delay) ──
-step "7. Bandwidth check"
-if [[ -n "${POD[IoT]:-}" && -n "${IP[Edge]:-}" ]]; then
-  echo "${TIER_NAME[IoT]} → ${TIER_NAME[Edge]} UDP (push 200M):"
-  kubectl exec -n $NS "${POD[IoT]}" -- \
-    iperf3 -c "${IP[Edge]}" -u -b 200M -t 5 -f m 2>&1 | tail -3 | sed 's/^/    /' || true
-fi
+# ─── 7. Bandwidth check (UDP, sender-egress shaping verification) ──
+step "7. Bandwidth check (UDP)"
 
-if [[ -n "${POD[Edge]:-}" && -n "${IP[Cloud]:-}" ]]; then
-  echo ""
-  echo "${TIER_NAME[Edge]} → ${TIER_NAME[Cloud]} TCP (4 threads, see effective cap):"
-  kubectl exec -n $NS "${POD[Edge]}" -- \
-    iperf3 -c "${IP[Cloud]}" -P 4 -t 5 -f g 2>&1 | tail -7 | sed 's/^/    /' || true
-fi
+# Helper: resolve a probe pod's IP from its arena.node label
+_pod_ip() {
+  kubectl get pod -n $NS -l "arena.node=$1" \
+    -o jsonpath='{.items[0].status.podIP}' 2>/dev/null
+}
+
+# Helper: '100Mbit' / '1Gbit' / '500kbit' → integer Mbit (rounded down)
+_bw_to_mbit() {
+  local bw="$1"
+  case "${bw,,}" in
+    *gbit) echo $(( ${bw%[Gg]bit} * 1000 )) ;;
+    *mbit) echo "${bw%[Mm]bit}" ;;
+    *kbit) echo $(( ${bw%[Kk]bit} / 1000 )) ;;
+    *)     echo 0 ;;
+  esac
+}
+
+# verify_bw_udp <src_label> <dst_label> <configured_mbit>
+#
+# Pushes UDP at 1.1× configured rate (split across 4 streams) and reports
+# what the sender's egress netem qdisc actually let through. Per Chaos Mesh
+# design, all shaping is applied on the sender pod's egress, so the
+# receiver-side throughput == the sender's enforced rate cap.
+verify_bw_udp() {
+  local src=$1 dst=$2 cfg=$3
+  [[ -z "$cfg" || "$cfg" -eq 0 ]] && return
+
+  local per_stream=$(( cfg * 11 / 10 / 4 ))M
+  local dst_ip; dst_ip=$(_pod_ip "$dst")
+  if [[ -z "$dst_ip" ]]; then
+    printf "    %-22s ERR: arena.node=%s not found\n" "$src→$dst" "$dst"
+    return
+  fi
+
+  local json
+  json=$(kubectl exec -n $NS "deploy/probe-$src" -- \
+    iperf3 -c "$dst_ip" -u -b "$per_stream" -l 1400 -w 16M -t 10 -O 2 -P 4 -J 2>/dev/null)
+  if [[ -z "$json" ]]; then
+    printf "    %-22s ERR: iperf3 no output\n" "$src→$dst"
+    return
+  fi
+
+  echo "$json" | jq -r --arg src "$src" --arg dst "$dst" --arg cfg "$cfg" '
+    (.end.sum_received.bits_per_second
+     // (.end.sum.bits_per_second * (1 - .end.sum.lost_percent/100))) as $shaped |
+    (.end.sum.bits_per_second) as $pushed |
+    "    \($src)→\($dst)   configured=\($cfg)Mbit   sender_egress_actual=\($shaped/1e6|floor)Mbit   (pushed=\($pushed/1e6|floor)Mbit, drop=\(.end.sum.lost_percent|floor)%)"
+  '
+}
+
+# Iterate every pair in matrix.csv and verify (skip self + zero-bw rows)
+echo "Reading configured rates from matrix.csv → testing every (src, dst) pair..."
+echo ""
+{
+  tail -n +2 "$LOG_DIR/matrix.csv" | while IFS=, read -r src dst latency bw loss jitter layers; do
+    [[ -z "$src" || "$src" == "$dst" ]] && continue
+    cfg_mbit=$(_bw_to_mbit "$bw")
+    [[ "$cfg_mbit" -le 0 ]] && continue
+    # arena.node labels are lowercase
+    verify_bw_udp "${src,,}" "${dst,,}" "$cfg_mbit"
+  done
+} | tee "$LOG_DIR/bandwidth-udp.txt"
 
 # ─── 8. Summary ──────────────────────────────────────────────────
 step "DONE"
@@ -185,3 +236,4 @@ echo "  $LOG_DIR/run.log        — full execution log"
 echo "  $LOG_DIR/matrix.csv     — resolved topology matrix"
 echo "  $LOG_DIR/chaos.yaml     — generated NetworkChaos manifests"
 echo "  $LOG_DIR/qdisc-iot.txt  — tc qdisc state in probe-iot"
+echo "  $LOG_DIR/bandwidth-udp.txt — per-pair UDP shaper verification"
