@@ -60,7 +60,17 @@ verify_bw() {
   local src=$1 dst=$2 cfg=$3   # cfg = integer Mbit/s
   [[ "$cfg" -le 0 ]] && return
 
-  local per_stream=$(( cfg * 11 / 10 / 4 ))M
+  local per_stream
+  local parallel
+  # 高带宽下单 pod userspace UDP 单线程顶 ~140 Mbit。≥500 Mbit/s 用 8 流
+  # 让每流压力降到 ~150 Mbit，避免 sender CPU 成为新瓶颈。
+  if [ "$cfg" -ge 500 ]; then
+    parallel=8
+    per_stream=$(( cfg * 11 / 10 / 8 ))M
+  else
+    parallel=4
+    per_stream=$(( cfg * 11 / 10 / 4 ))M
+  fi
   local dst_ip="${POD_IP[$dst]:-}"
   if [ -z "$dst_ip" ]; then
     printf "  %-22s  ERR: POD_IP[%s] empty (probe pod not Ready?)\n" "$src→$dst" "$dst"
@@ -71,7 +81,7 @@ verify_bw() {
   local errfile="$OUT_DIR/iperf3-${src}-to-${dst}.err"
   kubectl exec -n "$NS" "deploy/probe-$src" -- \
     iperf3 -c "$dst_ip" -u -b "$per_stream" -l 1200 \
-           -t 10 -O 2 -P 4 -J >"$outfile" 2>"$errfile" || true
+           -t 10 -O 2 -P "$parallel" -J >"$outfile" 2>"$errfile" || true
 
   local iperf_err; iperf_err=$(jq -r '.error // empty' "$outfile" 2>/dev/null)
   if [ -n "$iperf_err" ]; then
