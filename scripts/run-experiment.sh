@@ -360,7 +360,7 @@ verify_delay() {
 
 verify_bw() {
   local src=$1 dst=$2 expected=$3
-  local per_stream=$(( expected * 11 / 10 / 4 ))M   
+  local per_stream=$(( expected * 11 / 10 / 4 ))M
 
   local dst_ip
   dst_ip=$(kubectl get pod -n arena-net -l arena.node=$dst \
@@ -369,17 +369,23 @@ verify_bw() {
 
   # -w 16M = 16MB socket buffer (sender + receiver)
   # -P 4 = 4 streams
-  local json
-  json=$(kubectl exec -n arena-net deploy/probe-$src -- \
-    iperf3 -c "$dst_ip" -u -b "$per_stream" -l 1400 -w 16M -t 10 -O 2 -P 4 -J 2>/dev/null)
-  [ -z "$json" ] && { echo "    $src→$dst  ERR: 无输出"; return; }
+  local outfile="$LOG_DIR/iperf3-${src}-to-${dst}.json"
+  kubectl exec -n arena-net deploy/probe-$src -- \
+    iperf3 -c "$dst_ip" -u -b "$per_stream" -l 1400 -w 16M -t 10 -O 2 -P 4 -J >"$outfile" 2>&1
+  if ! jq -e '.end' "$outfile" >/dev/null 2>&1; then
+    local snippet; snippet=$(head -c 160 "$outfile" | tr '\n' ' ')
+    echo "    $src→$dst  ERR: ${snippet:-no output} (see $outfile)"
+    return
+  fi
 
-  echo "$json" | jq -r --arg src "$src" --arg dst "$dst" --arg exp "$expected" '
-    (.end.sum_received.bits_per_second
-     // (.end.sum.bits_per_second * (1 - .end.sum.lost_percent/100))) as $recv |
-    (.end.sum.bits_per_second) as $sent |
-    "    \($src)→\($dst)  expected=\($exp)Mbit  sent=\($sent/1e6|floor)Mbit  received=\($recv/1e6|floor)Mbit  drop=\(.end.sum.lost_percent|floor)%"
-  '
+  jq -r --arg src "$src" --arg dst "$dst" --arg exp "$expected" '
+    (.end.sum_received.bits_per_second // 0) as $recv_raw |
+    (.end.sum.bits_per_second // 0)          as $sent |
+    (.end.sum.lost_percent // 0)             as $loss |
+    (if $recv_raw > 0 then $recv_raw
+     else $sent * (1 - $loss/100) end)       as $recv |
+    "    \($src)→\($dst)  expected=\($exp)Mbit  sent=\($sent/1e6|floor)Mbit  received=\($recv/1e6|floor)Mbit  drop=\($loss|floor)%"
+  ' "$outfile"
 }
 
 verify_loss() {
