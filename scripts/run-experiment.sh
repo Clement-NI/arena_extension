@@ -372,11 +372,15 @@ verify_bw() {
     return
   fi
 
-  # -w 16M = 16MB socket buffer (sender + receiver)
-  # -P 4 = 4 streams
+  # -P 4 streams, -l 1200 stays under typical CNI MSS to avoid fragmentation
+  # warnings. No -w override: relying on default socket buffer + the bumped
+  # probe-pod CPU (2000m) to absorb UDP at multi-Gbit/s. iperf3 hard-fails
+  # if you request -w > net.core.{r,w}mem_max.
   local outfile="$LOG_DIR/iperf3-${src}-to-${dst}.json"
+  local errfile="$LOG_DIR/iperf3-${src}-to-${dst}.err"
   kubectl exec -n arena-net deploy/probe-$src -- \
-    iperf3 -c "$dst_ip" -u -b "$per_stream" -l 1400 -w 16M -t 10 -O 2 -P 4 -J >"$outfile" 2>&1
+    iperf3 -c "$dst_ip" -u -b "$per_stream" -l 1200 \
+           -t 10 -O 2 -P 4 -J >"$outfile" 2>"$errfile"
 
   # iperf3 always writes JSON (even on error). Detect failure by .error key.
   local iperf_err; iperf_err=$(jq -r '.error // empty' "$outfile" 2>/dev/null)
