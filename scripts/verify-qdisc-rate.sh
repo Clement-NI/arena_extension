@@ -116,26 +116,34 @@ measure_pair() {
     return
   fi
 
-  # Sink on dst (busybox nc + alpine), kill any stale listener first
-  kubectl exec -n $NS "deploy/probe-$dst" -- sh -c \
-    "pkill -f 'nc -l' 2>/dev/null; sleep 0.3; (nc -l -p $PORT > /dev/null 2>&1 &)" \
-    >/dev/null 2>&1 || true
-  sleep 0.5
+  # Kill any stale listener inside dst pod (best-effort, ignore errors)
+  kubectl exec -n $NS "deploy/probe-$dst" -- pkill -f "nc -l" >/dev/null 2>&1 || true
+  sleep 0.3
 
-  # Sample bytes, saturate, sample again. Default to 0 so arithmetic never
-  # blows up if a kubectl/docker call momentarily fails.
+  # Spawn nc listener via a BACKGROUND kubectl exec (not 'sh -c & disown').
+  # kubectl exec keeps the stdio attached → nc stays alive as long as
+  # this kubectl process is alive. We kill it after the measurement.
+  kubectl exec -n $NS "deploy/probe-$dst" -- nc -l -p $PORT >/dev/null 2>&1 &
+  local nc_pid=$!
+  sleep 1   # let nc bind
+
+  # Sample bytes at T0
   local b0 b1
   b0=$(_iface_tx_bytes "$node" "$pid")
   b0=${b0:-0}
 
+  # Saturate for DURATION seconds
   kubectl exec -n $NS "deploy/probe-$src" -- timeout "$DURATION" sh -c \
     "dd if=/dev/zero bs=1M 2>/dev/null | nc -w 2 $dst_ip $PORT" \
-    >/dev/null 2>&1 &
-  local push_pid=$!
-  sleep "$DURATION"
+    >/dev/null 2>&1 || true
+
+  # Sample bytes at T1
   b1=$(_iface_tx_bytes "$node" "$pid")
   b1=${b1:-0}
-  wait $push_pid 2>/dev/null || true
+
+  # Clean up the listener
+  kill "$nc_pid" 2>/dev/null || true
+  wait "$nc_pid" 2>/dev/null || true
 
   if [[ "$b0" == "0" && "$b1" == "0" ]]; then
     printf "  %-22s  ERR: kernel tx_bytes unreadable on src pod\n" "$src→$dst"
@@ -143,7 +151,12 @@ measure_pair() {
   fi
 
   local delta=$((b1 - b0))
-  local measured=$(( delta > 0 ? delta * 8 / DURATION / 1000000 : 0 ))
+  if (( delta <= 0 )); then
+    printf "  %-22s  ERR: no traffic observed (b0=%s b1=%s) — nc handshake likely failed\n" \
+      "$src→$dst" "$b0" "$b1"
+    return
+  fi
+  local measured=$(( delta * 8 / DURATION / 1000000 ))
 
   local diff=$(( cfg_mbit > measured ? cfg_mbit - measured : measured - cfg_mbit ))
   local pct=$(( cfg_mbit > 0 ? diff * 100 / cfg_mbit : 100 ))
