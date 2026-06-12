@@ -50,9 +50,9 @@ for name in $CONFLICT; do
 done
 ok "cleared"
 
-# ─── 3. compute rate in mbps for chaos-mesh ───────────────────
-# topology uses bits/s ("100Mbit"); chaos-mesh rate.rate is in bytes/s
-# ("mbps" / "gbps"). 1 Mbit/s = 0.125 MB/s, 1 Gbit/s = 125 MB/s.
+# ─── 3. compute rate in mbit for chaos-mesh ───────────────────
+# topology uses bits/s ("100Mbit"); we emit chaos-mesh `rate.rate` in
+# bits/s ("mbit"/"gbit"), matching the DSL one-to-one.
 step "3. Compute chaos-mesh rate"
 # parse RATE: "10000Mbit" → 10_000 Mbit/s
 RAW_NUM=$(echo "$RATE" | sed -E 's/[^0-9.]//g')
@@ -63,18 +63,18 @@ case "$RAW_UNIT" in
   kbit) BITS=$(awk "BEGIN{print $RAW_NUM*1e3}") ;;
   *)    fail "unknown RATE unit: $RAW_UNIT (use Mbit/Gbit)" ;;
 esac
-BYTES=$(awk "BEGIN{printf \"%.0f\", $BITS/8}")
+BITS=$(awk "BEGIN{printf \"%.0f\", $BITS}")
 # pick largest unit where value is integer ≥ 1
-if (( BYTES >= 1000000000 )) && (( BYTES % 1000000000 == 0 )); then
-  CHAOS_RATE="$((BYTES/1000000000))gbps"
-elif (( BYTES >= 1000000 )); then
-  CHAOS_RATE="$((BYTES/1000000))mbps"
-elif (( BYTES >= 1000 )); then
-  CHAOS_RATE="$((BYTES/1000))kbps"
+if (( BITS >= 1000000000 )) && (( BITS % 1000000000 == 0 )); then
+  CHAOS_RATE="$((BITS/1000000000))gbit"
+elif (( BITS >= 1000000 )) && (( BITS % 1000000 == 0 )); then
+  CHAOS_RATE="$((BITS/1000000))mbit"
+elif (( BITS >= 1000 )) && (( BITS % 1000 == 0 )); then
+  CHAOS_RATE="$((BITS/1000))kbit"
 else
-  CHAOS_RATE="${BYTES}bps"
+  CHAOS_RATE="${BITS}bit"
 fi
-ok "$RATE → $CHAOS_RATE (= ${BITS} bit/s = ${BYTES} byte/s)"
+ok "$RATE → $CHAOS_RATE (= ${BITS} bit/s)"
 
 # ─── 4. apply NetworkChaos ─────────────────────────────────────
 step "4. Apply NetworkChaos (action: netem, rate=$CHAOS_RATE)"

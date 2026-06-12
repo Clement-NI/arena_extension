@@ -11,9 +11,9 @@ all three through netem's built-in `rate` for bandwidth shaping.
 
 Notes on units:
 - Topology YAML expresses bandwidth in bits/s units (e.g. "100Mbit").
-- We emit Chaos Mesh `rate.rate` in bytes/s units (`mbps`/`gbps`) to
-  match the canonical Arena NetworkChaos format. Conversion:
-  100 Mbit/s → 12 mbps.
+- We emit Chaos Mesh `rate.rate` in bits/s units (`mbit`/`gbit`/`kbit`),
+  which match the topology DSL unambiguously and are accepted by tc /
+  chaos-mesh directly. No bytes/s conversion needed.
 """
 
 from __future__ import annotations
@@ -61,28 +61,25 @@ def _parse_bits_per_sec(rate: str) -> float:
 def _to_chaos_rate(bw: str) -> str:
     """Convert '100Mbit' (topology) → integer Chaos Mesh rate string.
 
-    Always emits with the `mbps` suffix (megabytes/s), rounded to the
-    nearest integer. Matches the canonical Arena NetworkChaos format
-    (e.g. "10mbps", "125mbps"). For sub-1 MB/s rates we fall back to
-    `kbps`.
+    Always emits in bits/s units (`mbit`/`gbit`/`kbit`), matching the
+    topology DSL and tc semantics unambiguously. No bytes/s conversion.
 
     Examples:
-        "100Mbit" →  "12mbps"   (100/8 = 12.5 → 12, ~4% rounding loss)
-        "500Mbit" →  "62mbps"   (500/8 = 62.5 → 62, ~0.8% rounding loss)
-        "1Gbit"   → "125mbps"   (exact)
-        "100kbit" →  "12kbps"   (sub-MB falls back to kbps)
+        "100Mbit" → "100mbit"   (exact, no rounding loss)
+        "500Mbit" → "500mbit"   (exact)
+        "1Gbit"   → "1gbit"     (exact)
+        "10Gbit"  → "10gbit"    (exact)
 
     Chaos Mesh validates rate.rate via strconv.ParseUint so we MUST emit
-    an integer.
+    an integer. We pick the largest unit (gbit > mbit > kbit > bit) where
+    the value is still an integer ≥ 1.
     """
-    bytes_per_sec = _parse_bits_per_sec(bw) / 8
-    mbps = bytes_per_sec / 1e6
-    if mbps >= 1:
-        return f"{int(round(mbps))}mbps"
-    kbps = bytes_per_sec / 1e3
-    if kbps >= 1:
-        return f"{int(round(kbps))}kbps"
-    return f"{max(int(round(bytes_per_sec)), 1)}bps"
+    bits_per_sec = _parse_bits_per_sec(bw)
+    for unit, divisor in (("gbit", 1e9), ("mbit", 1e6), ("kbit", 1e3), ("bit", 1)):
+        value = bits_per_sec / divisor
+        if value >= 1 and value == int(value):
+            return f"{int(value)}{unit}"
+    return f"{max(int(round(bits_per_sec)), 1)}bit"
 
 
 def _has_any(metric: Metric) -> bool:
