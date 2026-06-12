@@ -135,16 +135,18 @@ SUM_LOSS=$(echo "$OUT" | awk '/\[SUM\].*receiver/' | grep -oE '\([0-9.]+%\)' | t
 
 # Read the actual qdisc Sent counter — the ground truth of what the shaper released.
 # Match the rate we configured ($CHAOS_RATE) to find OUR netem qdisc among many.
+# tc displays the rate as e.g. "50Mbit" (capital M); we compare case-insensitively.
 QDISC_BYTES=$(kubectl exec -n "$NS" deploy/probe-"$SRC" -- sh -c \
   "(apk add iproute2 >/dev/null 2>&1 || true); tc -s qdisc show dev eth0" 2>/dev/null \
   | awk -v r="$CHAOS_RATE" '
-      /qdisc netem/ && index($0, r) > 0 { in_target=1; next }
-      /qdisc / && !/qdisc netem/ { in_target=0 }
-      in_target && /Sent.*bytes/ { gsub(",", "", $2); print $2; exit }
+      BEGIN { IGNORECASE = 1 }
+      /qdisc netem/ && index(tolower($0), tolower(r)) > 0 { in_target=1; next }
+      /^qdisc / { in_target=0 }
+      in_target && /Sent/ && /bytes/ { gsub(",", "", $2); print $2; exit }
   ')
 if [[ -n "$QDISC_BYTES" && "$QDISC_BYTES" -gt 0 ]]; then
   SHAPER_OUT_MBIT=$(awk -v b="$QDISC_BYTES" -v d="$DURATION" \
-    'BEGIN{printf "%.1f", (b*8)/(d*1000000)}')
+    'BEGIN{printf "%.2f", (b*8)/(d*1000000)}')
 else
   SHAPER_OUT_MBIT="?"
 fi
