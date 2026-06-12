@@ -44,7 +44,7 @@ spec:
       labelSelectors:
         app: transcoder
   bandwidth:
-    rate: "200mbps"
+    rate: "200mbit"
     buffer: 10000
     limit: 10000
 ---
@@ -118,7 +118,7 @@ spec:
       labelSelectors:
         app: storage
   bandwidth:
-    rate: "10gbps"
+    rate: "10gbit"
     buffer: 10000
     limit: 10000
 ---
@@ -168,6 +168,6 @@ spec:
       labelSelectors:
         app: analytics
   bandwidth:
-    rate: "10gbps"
+    rate: "10gbit"
     buffer: 10000
     limit: 10000

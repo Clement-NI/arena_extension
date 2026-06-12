@@ -83,12 +83,12 @@ links:                              # Liens entre applications
 Le fichier `network_profiles.yaml` associé (bibliothèque de scénarios) :
 
 ```yaml
-4G_suburban:    { latency: "40ms", jitter: "10ms", bandwidth: "20mbps", loss: "0.5%" }
-5G_urban:       { latency: "10ms", jitter: "2ms",  bandwidth: "200mbps", loss: "0.1%" }
-wifi_indoor:    { latency: "5ms",                  bandwidth: "100mbps", loss: "0.3%" }
-fiber_datacenter: { latency: "1ms",                bandwidth: "10gbps",  loss: "0%" }
-satellite:      { latency: "600ms",                bandwidth: "5mbps",   loss: "2%" }
-lossy_wireless: { latency: "20ms",                 bandwidth: "10mbps",  loss: "5%" }
+4G_suburban:    { latency: "40ms", jitter: "10ms", bandwidth: "20mbit", loss: "0.5%" }
+5G_urban:       { latency: "10ms", jitter: "2ms",  bandwidth: "200mbit", loss: "0.1%" }
+wifi_indoor:    { latency: "5ms",                  bandwidth: "100mbit", loss: "0.3%" }
+fiber_datacenter: { latency: "1ms",                bandwidth: "10gbit",  loss: "0%" }
+satellite:      { latency: "600ms",                bandwidth: "5mbit",   loss: "2%" }
+lossy_wireless: { latency: "20ms",                 bandwidth: "10mbit",  loss: "5%" }
 ```
 
 ---
@@ -290,32 +290,32 @@ links:
 4G_suburban:
   latency: "40ms"
   jitter: "10ms"
-  bandwidth: "20mbps"
+  bandwidth: "20mbit"
   loss: "0.5%"
 
 5G_urban:
   latency: "10ms"
   jitter: "2ms"
-  bandwidth: "200mbps"
+  bandwidth: "200mbit"
   loss: "0.1%"
 
 wifi_indoor:
   latency: "5ms"
-  bandwidth: "100mbps"
+  bandwidth: "100mbit"
   loss: "0.3%"
 
 fiber_datacenter:
   latency: "1ms"
-  bandwidth: "10gbps"
+  bandwidth: "10gbit"
   loss: "0%"
 
 satellite:
   latency: "600ms"
-  bandwidth: "5mbps"
+  bandwidth: "5mbit"
   loss: "2%"
 
 lossy_wireless:
   latency: "20ms"
-  bandwidth: "10mbps"
+  bandwidth: "10mbit"
   loss: "5%"
 ```

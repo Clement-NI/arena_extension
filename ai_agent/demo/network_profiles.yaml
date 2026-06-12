@@ -4,35 +4,35 @@
 4G_suburban:
   latency: "40ms"
   jitter: "10ms"
-  bandwidth: "20mbps"
+  bandwidth: "20mbit"
   loss: "0.5%"
 
 5G_urban:
   latency: "10ms"
   jitter: "2ms"
-  bandwidth: "200mbps"
+  bandwidth: "200mbit"
   loss: "0.1%"
 
 wifi_indoor:
   latency: "5ms"
   jitter: "1ms"
-  bandwidth: "100mbps"
+  bandwidth: "100mbit"
   loss: "0.3%"
 
 fiber_datacenter:
   latency: "1ms"
   jitter: "0ms"
-  bandwidth: "10gbps"
+  bandwidth: "10gbit"
   loss: "0%"
 
 satellite:
   latency: "600ms"
   jitter: "50ms"
-  bandwidth: "5mbps"
+  bandwidth: "5mbit"
   loss: "2%"
 
 lossy_wireless:
   latency: "20ms"
   jitter: "5ms"
-  bandwidth: "10mbps"
+  bandwidth: "10mbit"
   loss: "5%"

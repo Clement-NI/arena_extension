@@ -96,12 +96,12 @@ links:                              # 应用间链路
 配套的 `network_profiles.yaml`（预定义场景库）：
 
 ```yaml
-4G_suburban:    { latency: "40ms", jitter: "10ms", bandwidth: "20mbps", loss: "0.5%" }
-5G_urban:       { latency: "10ms", jitter: "2ms",  bandwidth: "200mbps", loss: "0.1%" }
-wifi_indoor:    { latency: "5ms",                  bandwidth: "100mbps", loss: "0.3%" }
-fiber_datacenter: { latency: "1ms",                bandwidth: "10gbps",  loss: "0%" }
-satellite:      { latency: "600ms",                bandwidth: "5mbps",   loss: "2%" }
-lossy_wireless: { latency: "20ms",                 bandwidth: "10mbps",  loss: "5%" }
+4G_suburban:    { latency: "40ms", jitter: "10ms", bandwidth: "20mbit", loss: "0.5%" }
+5G_urban:       { latency: "10ms", jitter: "2ms",  bandwidth: "200mbit", loss: "0.1%" }
+wifi_indoor:    { latency: "5ms",                  bandwidth: "100mbit", loss: "0.3%" }
+fiber_datacenter: { latency: "1ms",                bandwidth: "10gbit",  loss: "0%" }
+satellite:      { latency: "600ms",                bandwidth: "5mbit",   loss: "2%" }
+lossy_wireless: { latency: "20ms",                 bandwidth: "10mbit",  loss: "5%" }
 ```
 
 ---
@@ -193,7 +193,7 @@ ai_agent/
 - [ ] D1-2：`prometheus_client.py` — 拉 Prometheus 数据
 - [ ] D2-3：`analyzer.py` — CSV 处理 + 统计
 - [ ] D3-5：把论文实验 2（IoT→Kafka→Logstash→ES + 限速）改写成 `topology.yaml`
-- [ ] D5-7：跑 5 个限速档（无限/10/5/2/1 Mbps），对比论文 Figure 5
+- [ ] D5-7：跑 5 个限速档（无限/10/5/2/1 Mbit），对比论文 Figure 5
 
 > **🎯 里程碑 1**：复现论文 Figure 5 的数据（5.7→11.3→27.7→41.7→41.9 docs/s），误差 < 10%
 > **意义**：证明 B/C/D/E 整条流水线正确

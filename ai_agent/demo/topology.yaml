@@ -7,9 +7,9 @@
 #   - analytics (Cloud)  : analyse les images avec un modèle ML
 #
 # 3 liens :
-#   camera → transcoder : 5G urbain (10ms, 200 Mbps)
-#   transcoder → storage : fibre datacenter (1ms, 10 Gbps)
-#   transcoder → analytics : fibre datacenter (1ms, 10 Gbps)
+#   camera → transcoder : 5G urbain (10ms, 200 Mbit)
+#   transcoder → storage : fibre datacenter (1ms, 10 Gbit)
+#   transcoder → analytics : fibre datacenter (1ms, 10 Gbit)
 #
 # Ressources cohérentes avec arena_testbed/nodes.json (IoT=1c/2Gi, Edge=2c/4Gi, Cloud=8c/16Gi)
 

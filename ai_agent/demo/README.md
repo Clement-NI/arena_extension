@@ -33,7 +33,7 @@ Un pipeline « ville intelligente » :
 3× capteurs IoT    →    1× processeur Edge    →    1× stockage Cloud
                     │                          │
                   5G urbain                fibre datacenter
-                  (10ms, 200Mbps)          (1ms, 10Gbps)
+                  (10ms, 200Mbit)          (1ms, 10Gbit)
 ```
 
 ## Prérequis (sur une vraie machine)
@@ -136,7 +136,7 @@ Puis relancez `./run.sh`.
 ```yaml
 5G_indoor:
   latency: "8ms"
-  bandwidth: "300mbps"
+  bandwidth: "300mbit"
   loss: "0.05%"
 ```
 
