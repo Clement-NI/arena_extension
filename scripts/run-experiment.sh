@@ -230,7 +230,7 @@ fi
 docker network ls --format '{{.Name}}' | grep -qx kind && \
   docker network rm kind >>"$LOG_DIR/cleanup.log" 2>&1 || true
 
-bash arena_testbed/1-launch_cluster.sh >"$LOG_DIR/launch.log" 2>&1 || \
+bash arena_testbed/1-launch_cluster.sh >"$LOG_DIR/launch.log"|| \
   fail "cluster launch failed, check $LOG_DIR/launch.log"
 
 NODES=$(kubectl get nodes --no-headers 2>/dev/null | wc -l)
@@ -242,7 +242,7 @@ ok "cluster up — 7 nodes (3 IoT + 2 Edge + 1 Cloud + 1 Controller)"
 # ───────────────────────────────────────────────────────────────
 
 step "9. Install Cilium + Prometheus + Chaos Mesh"
-bash arena_testbed/2-set_frameworks.sh >"$LOG_DIR/frameworks.log" 2>&1 || \
+bash arena_testbed/2-set_frameworks.sh >"$LOG_DIR/frameworks.log"|| \
   fail "framework install failed, see $LOG_DIR/frameworks.log"
 
 kubectl wait --for=condition=Ready node --all --timeout=300s >>"$LOG_DIR/wait-nodes.log" 2>&1 || \
