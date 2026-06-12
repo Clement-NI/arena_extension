@@ -30,7 +30,7 @@
 #                                  [-T 10]   # tolerance %
 #                                  [-d 10]   # seconds per pair
 
-set -euo pipefail
+set -uo pipefail   # NOT -e: a single failing kubectl/docker call must not abort the whole sweep
 
 TOPO=examples/topology.yaml
 NODES=arena_testbed/nodes.json
@@ -102,11 +102,15 @@ measure_pair() {
   local src=$1 dst=$2 cfg_mbit=$3
   [[ "$cfg_mbit" -le 0 ]] && return
 
-  _load_pod_ns "$src"
-  local node=${NS_NODE[$src]} pid=${NS_PID[$src]}
+  _load_pod_ns "$src" || true
+  local node=${NS_NODE[$src]:-} pid=${NS_PID[$src]:-}
+  if [[ -z "$node" || -z "$pid" ]]; then
+    printf "  %-22s  ERR: can't resolve netns for src=%s\n" "$src→$dst" "$src"
+    return
+  fi
 
   local dst_ip
-  dst_ip=$(kubectl get pod -n $NS -l app=probe-$dst -o jsonpath='{.items[0].status.podIP}' 2>/dev/null)
+  dst_ip=$(kubectl get pod -n $NS -l app=probe-$dst -o jsonpath='{.items[0].status.podIP}' 2>/dev/null || true)
   if [[ -z "$dst_ip" ]]; then
     printf "  %-22s  ERR: dst pod IP not found\n" "$src→$dst"
     return
@@ -115,12 +119,14 @@ measure_pair() {
   # Sink on dst (busybox nc + alpine), kill any stale listener first
   kubectl exec -n $NS "deploy/probe-$dst" -- sh -c \
     "pkill -f 'nc -l' 2>/dev/null; sleep 0.3; (nc -l -p $PORT > /dev/null 2>&1 &)" \
-    2>/dev/null
+    >/dev/null 2>&1 || true
   sleep 0.5
 
-  # Sample bytes, saturate, sample again
+  # Sample bytes, saturate, sample again. Default to 0 so arithmetic never
+  # blows up if a kubectl/docker call momentarily fails.
   local b0 b1
   b0=$(_iface_tx_bytes "$node" "$pid")
+  b0=${b0:-0}
 
   kubectl exec -n $NS "deploy/probe-$src" -- timeout "$DURATION" sh -c \
     "dd if=/dev/zero bs=1M 2>/dev/null | nc -w 2 $dst_ip $PORT" \
@@ -128,10 +134,16 @@ measure_pair() {
   local push_pid=$!
   sleep "$DURATION"
   b1=$(_iface_tx_bytes "$node" "$pid")
+  b1=${b1:-0}
   wait $push_pid 2>/dev/null || true
 
+  if [[ "$b0" == "0" && "$b1" == "0" ]]; then
+    printf "  %-22s  ERR: kernel tx_bytes unreadable on src pod\n" "$src→$dst"
+    return
+  fi
+
   local delta=$((b1 - b0))
-  local measured=$(( delta * 8 / DURATION / 1000000 ))
+  local measured=$(( delta > 0 ? delta * 8 / DURATION / 1000000 : 0 ))
 
   local diff=$(( cfg_mbit > measured ? cfg_mbit - measured : measured - cfg_mbit ))
   local pct=$(( cfg_mbit > 0 ? diff * 100 / cfg_mbit : 100 ))
@@ -159,12 +171,14 @@ done
 echo
 
 echo "── per-pair measurement ──"
-echo "$MATRIX" | tail -n +2 | while IFS=, read -r src dst latency bw loss jitter layers; do
+# process substitution (not pipe) so the loop is NOT in a subshell — failures
+# on one pair don't terminate the sweep, and arrays like NS_NODE persist.
+while IFS=, read -r src dst latency bw loss jitter layers; do
   [[ -z "$src" || "$src" == "$dst" ]] && continue
   cfg_mbit=$(_bw_to_mbit "$bw")
   [[ "$cfg_mbit" -le 0 ]] && continue
   measure_pair "${src,,}" "${dst,,}" "$cfg_mbit"
-done
+done < <(echo "$MATRIX" | tail -n +2)
 
 echo
 echo "Done. If most rows FAIL with measured ≫ configured, chaos-mesh did"
