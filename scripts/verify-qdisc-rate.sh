@@ -1,24 +1,34 @@
 #!/usr/bin/env bash
-# verify-qdisc-rate.sh — ground-truth bandwidth verification via kernel counters
+# verify-qdisc-rate.sh — measure whether chaos-mesh actually enforces
+# the configured bandwidth, by reading the kernel byte counter on the
+# qdisc that chaos-mesh installed on each src pod's eth0.
 #
-# Bypasses chaos-mesh AND iperf3. For each (src, dst) pair in the topology:
-#   1. Install netem (delay, rate, loss) directly on src pod's eth0 root.
-#   2. Push dd | nc from src → dst at MAX speed (no app-side rate limit) so
-#      the shaper is the bottleneck.
-#   3. Sample `tc -s qdisc show` byte counter at T0 and T+DURATION on src,
-#      compute (ΔBytes × 8) / Δt = enforced rate in bit/s.
-#   4. Compare against the configured rate, report PASS/FAIL.
-#   5. Remove the netem qdisc (clean state for next pair).
+# What this verifies
+# ──────────────────
+# For every (src, dst, configured_rate) pair in the resolved matrix:
 #
-# The measurement is the SHAPER's actual byte output — immune to iperf3's
-# userspace syscall limit, receiver kernel buffer overflow, TCP backoff,
-# CNI quirks, etc. If this number matches the configured rate, the netem
-# mechanism enforces the rate correctly. Period.
+#   1. Saturate the link: dd /dev/zero | nc dst:19999 — pushes faster
+#      than any reasonable shaper, forcing the qdisc to become the
+#      bottleneck.
+#   2. Sample `tc -s qdisc show dev eth0` byte counter on src at T0
+#      and T+DURATION. (ΔBytes × 8) / Δt = the rate that ACTUALLY
+#      passed through whatever shaper chaos-mesh installed.
+#   3. Compare to the topology-configured rate within ±TOLERANCE %.
+#
+# Interpretation
+# ──────────────
+#   measured ≈ configured  → chaos-mesh's netem IS enforcing the cap. ✓
+#   measured ≫ configured  → chaos-mesh's qdisc is not in effect
+#                            (likely `noqueue` on root, see header banner).
+#   measured ≪ configured  → some other bottleneck (CPU, sink CPU, etc).
+#
+# This script does NOT install or modify any qdisc. It is purely an
+# observer of whatever state chaos-mesh has left the pod in.
 #
 # Usage:
 #   ./scripts/verify-qdisc-rate.sh [-t topology.yaml] [-n nodes.json]
-#                                  [-T 10]          # tolerance %
-#                                  [-d 10]          # seconds per pair
+#                                  [-T 10]   # tolerance %
+#                                  [-d 10]   # seconds per pair
 
 set -euo pipefail
 
@@ -39,7 +49,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# '100Mbit' / '1Gbit' / '5Mbit' / '100kbit' → integer Mbit (floor)
 _bw_to_mbit() {
   local bw="${1,,}"
   case "$bw" in
@@ -50,7 +59,6 @@ _bw_to_mbit() {
   esac
 }
 
-# Resolve src pod → (node_container, host_pid) for nsenter
 declare -A NS_NODE NS_PID
 _load_pod_ns() {
   local label=$1
@@ -64,35 +72,39 @@ _load_pod_ns() {
   NS_PID[$label]="$pid"
 }
 
-_qdisc_bytes() {
+# Read total bytes sent on eth0 from /sys/class/net stats (covers all qdiscs).
+# Falls back to root qdisc Sent counter if /sys not readable.
+_iface_tx_bytes() {
   local node=$1 pid=$2
-  docker exec "$node" nsenter -t "$pid" -n tc -s qdisc show dev eth0 \
-    | awk '/Sent/{print $2; exit}'
+  docker exec "$node" nsenter -t "$pid" -n cat /sys/class/net/eth0/statistics/tx_bytes 2>/dev/null \
+    || docker exec "$node" nsenter -t "$pid" -n tc -s qdisc show dev eth0 \
+       | awk '/Sent/{print $2; exit}'
 }
 
-# Trap cleanup — never leave a stale qdisc or nc listener if user Ctrl-C's
-declare -a INSTALLED_QDISCS=()
+# Dump the qdisc tree once at startup so the user sees what chaos-mesh did.
+_show_qdisc_state() {
+  local label=$1
+  local node=${NS_NODE[$label]} pid=${NS_PID[$label]}
+  echo "--- $label eth0 qdisc state ---"
+  docker exec "$node" nsenter -t "$pid" -n tc qdisc show dev eth0 | sed 's/^/    /'
+}
+
+# Trap: only kills nc listeners — never touches qdiscs (the whole point
+# is to observe chaos-mesh's qdisc state untouched).
 cleanup() {
-  echo
-  echo "Cleaning up …"
-  for entry in "${INSTALLED_QDISCS[@]}"; do
-    local n p
-    n=${entry%%|*}; p=${entry##*|}
-    docker exec "$n" nsenter -t "$p" -n tc qdisc del dev eth0 root 2>/dev/null || true
-  done
-  kubectl exec -n $NS deploy/probe-iot-1 -- pkill -f "nc -l" 2>/dev/null || true
-  for d in iot-2 iot-3 edge-1 edge-2 cloud; do
+  for d in iot-1 iot-2 iot-3 edge-1 edge-2 cloud; do
     kubectl exec -n $NS "deploy/probe-$d" -- pkill -f "nc -l" 2>/dev/null || true
   done
 }
 trap cleanup EXIT INT TERM
 
-verify_qdisc() {
-  local src=$1 dst=$2 cfg_mbit=$3 cfg_lat=$4 cfg_loss=$5
+measure_pair() {
+  local src=$1 dst=$2 cfg_mbit=$3
   [[ "$cfg_mbit" -le 0 ]] && return
 
   _load_pod_ns "$src"
   local node=${NS_NODE[$src]} pid=${NS_PID[$src]}
+
   local dst_ip
   dst_ip=$(kubectl get pod -n $NS -l app=probe-$dst -o jsonpath='{.items[0].status.podIP}' 2>/dev/null)
   if [[ -z "$dst_ip" ]]; then
@@ -100,46 +112,29 @@ verify_qdisc() {
     return
   fi
 
-  # Install netem with configured params (replace any existing root qdisc)
-  docker exec "$node" nsenter -t "$pid" -n tc qdisc del dev eth0 root 2>/dev/null || true
-  local opts="delay $cfg_lat rate ${cfg_mbit}mbit limit 10000"
-  if [[ -n "$cfg_loss" && "$cfg_loss" != "0" && "$cfg_loss" != "0.0" ]]; then
-    opts="$opts loss ${cfg_loss}%"
-  fi
-  if ! docker exec "$node" nsenter -t "$pid" -n tc qdisc add dev eth0 root netem $opts 2>/dev/null; then
-    printf "  %-22s  ERR: tc qdisc add failed (opts: %s)\n" "$src→$dst" "$opts"
-    return
-  fi
-  INSTALLED_QDISCS+=("$node|$pid")
-
-  # Sink on dst pod
-  kubectl exec -n $NS deploy/probe-$dst -- sh -c \
+  # Sink on dst (busybox nc + alpine), kill any stale listener first
+  kubectl exec -n $NS "deploy/probe-$dst" -- sh -c \
     "pkill -f 'nc -l' 2>/dev/null; sleep 0.3; (nc -l -p $PORT > /dev/null 2>&1 &)" \
     2>/dev/null
   sleep 0.5
 
-  # T0 → push max → T1
+  # Sample bytes, saturate, sample again
   local b0 b1
-  b0=$(_qdisc_bytes "$node" "$pid")
+  b0=$(_iface_tx_bytes "$node" "$pid")
 
-  kubectl exec -n $NS deploy/probe-$src -- timeout "$DURATION" sh -c \
+  kubectl exec -n $NS "deploy/probe-$src" -- timeout "$DURATION" sh -c \
     "dd if=/dev/zero bs=1M 2>/dev/null | nc -w 2 $dst_ip $PORT" \
     >/dev/null 2>&1 &
   local push_pid=$!
   sleep "$DURATION"
-  b1=$(_qdisc_bytes "$node" "$pid")
+  b1=$(_iface_tx_bytes "$node" "$pid")
   wait $push_pid 2>/dev/null || true
 
-  # Compute rate in Mbit/s
   local delta=$((b1 - b0))
   local measured=$(( delta * 8 / DURATION / 1000000 ))
 
-  # Cleanup this pair's qdisc immediately
-  docker exec "$node" nsenter -t "$pid" -n tc qdisc del dev eth0 root 2>/dev/null || true
-
-  # Compare
   local diff=$(( cfg_mbit > measured ? cfg_mbit - measured : measured - cfg_mbit ))
-  local pct=$(( diff * 100 / cfg_mbit ))
+  local pct=$(( cfg_mbit > 0 ? diff * 100 / cfg_mbit : 100 ))
   local status="OK"
   [ "$pct" -gt "$TOLERANCE" ] && status="FAIL"
 
@@ -149,16 +144,30 @@ verify_qdisc() {
 
 MATRIX=$(python3 -m tools.topology.cli -t "$TOPO" -n "$NODES" preview)
 
-echo "═══ QDISC-LEVEL BANDWIDTH (kernel tc -s counter; tolerance ±${TOLERANCE}%) ═══"
-echo "    bypasses chaos-mesh + iperf3 ; per-pair test = ${DURATION}s"
+echo "═══ CHAOS-MESH BANDWIDTH ENFORCEMENT (observe-only; tolerance ±${TOLERANCE}%) ═══"
+echo "    reads kernel eth0 tx_bytes on each src pod;"
+echo "    pushes dd|nc at wire speed so the shaper is the bottleneck;"
+echo "    does NOT install or modify any qdisc — pure observer of chaos-mesh state."
 echo
 
+# Show current qdisc state on every src pod once (informative for diagnosis)
+echo "── current qdisc state (per src pod) ──"
+for src in iot-1 iot-2 iot-3 edge-1 edge-2 cloud; do
+  _load_pod_ns "$src" 2>/dev/null || continue
+  _show_qdisc_state "$src"
+done
+echo
+
+echo "── per-pair measurement ──"
 echo "$MATRIX" | tail -n +2 | while IFS=, read -r src dst latency bw loss jitter layers; do
   [[ -z "$src" || "$src" == "$dst" ]] && continue
   cfg_mbit=$(_bw_to_mbit "$bw")
   [[ "$cfg_mbit" -le 0 ]] && continue
-  verify_qdisc "${src,,}" "${dst,,}" "$cfg_mbit" "$latency" "$loss"
+  measure_pair "${src,,}" "${dst,,}" "$cfg_mbit"
 done
 
 echo
-echo "All clean."
+echo "Done. If most rows FAIL with measured ≫ configured, chaos-mesh did"
+echo "not install netem (check the qdisc state block above — root will be"
+echo "'noqueue' on broken pods). If measured ≈ configured, the shaper is"
+echo "enforcing the rate correctly."
