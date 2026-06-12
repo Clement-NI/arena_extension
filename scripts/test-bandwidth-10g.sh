@@ -133,17 +133,34 @@ SUM_SENT=$(echo "$OUT" | awk '/\[SUM\].*sender/{print $6" "$7}')
 SUM_RECV=$(echo "$OUT" | awk '/\[SUM\].*receiver/{print $6" "$7}')
 SUM_LOSS=$(echo "$OUT" | awk '/\[SUM\].*receiver/' | grep -oE '\([0-9.]+%\)' | tail -1)
 
-echo
-printf "  Expected shaper : ${G}%-15s${X}\n" "$RATE"
-printf "  Sender egress   : ${G}%-15s${X}  (≈ shaper × 1.1 minus drops)\n" "$SUM_SENT"
-printf "  Receiver ingress: ${G}%-15s${X}\n" "$SUM_RECV"
-printf "  Total UDP loss  : ${G}%-15s${X}  (receiver-side, includes pod CPU drops)\n" "${SUM_LOSS:-?}"
+# Read the actual qdisc Sent counter — the ground truth of what the shaper released.
+# Match the rate we configured ($CHAOS_RATE) to find OUR netem qdisc among many.
+QDISC_BYTES=$(kubectl exec -n "$NS" deploy/probe-"$SRC" -- sh -c \
+  "(apk add iproute2 >/dev/null 2>&1 || true); tc -s qdisc show dev eth0" 2>/dev/null \
+  | awk -v r="$CHAOS_RATE" '
+      /qdisc netem/ && index($0, r) > 0 { in_target=1; next }
+      /qdisc / && !/qdisc netem/ { in_target=0 }
+      in_target && /Sent.*bytes/ { gsub(",", "", $2); print $2; exit }
+  ')
+if [[ -n "$QDISC_BYTES" && "$QDISC_BYTES" -gt 0 ]]; then
+  SHAPER_OUT_MBIT=$(awk -v b="$QDISC_BYTES" -v d="$DURATION" \
+    'BEGIN{printf "%.1f", (b*8)/(d*1000000)}')
+else
+  SHAPER_OUT_MBIT="?"
+fi
 
-# tc final counters
 echo
-echo "  ${B}tc qdisc final counters (source pod):${X}"
+printf "  Expected shaper      : ${G}%-15s${X}\n" "$RATE"
+printf "  iperf3 sender push   : ${G}%-15s${X}  (app-layer rate, NOT shaper egress)\n" "$SUM_SENT"
+printf "  ${G}Shaper egress (tc Sent)${X}: ${G}%-15s${X}  ← ground truth of what shaper released\n" "${SHAPER_OUT_MBIT} Mbit/s"
+printf "  Receiver ingress     : ${G}%-15s${X}\n" "$SUM_RECV"
+printf "  UDP loss (receiver)  : ${G}%-15s${X}\n" "${SUM_LOSS:-?}"
+
+# tc final counters (full dump for forensic)
+echo
+echo "  ${B}tc qdisc full dump (source pod):${X}"
 kubectl exec -n "$NS" deploy/probe-"$SRC" -- sh -c \
-  '(apk add iproute2 >/dev/null 2>&1 || true); tc -s qdisc show dev eth0 2>/dev/null | head -10' \
+  '(apk add iproute2 >/dev/null 2>&1 || true); tc -s qdisc show dev eth0 2>/dev/null | head -30' \
   | sed 's/^/    /' || true
 
 # ─── 8. cleanup ────────────────────────────────────────────────
