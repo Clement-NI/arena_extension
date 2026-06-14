@@ -1,16 +1,21 @@
 #!/usr/bin/env bash
-# test-bandwidth-10g.sh — single-pair bandwidth experiment.
+# test-bandwidth-10g.sh — single-pair link characterization experiment.
 #
-# Applies ONE NetworkChaos with a 10 Gbit/s shaper on iot-1 → cloud,
-# then runs iperf3 UDP from iot-1 to cloud for 5 minutes (or user-set
-# duration). Reports sender-egress (= what the shaper let through)
-# and receiver throughput.
+# Applies ONE NetworkChaos combining bandwidth + (optional) delay + loss
+# on SRC → DST, runs iperf3 UDP for DURATION seconds, then reports the
+# shaper's actual egress (from tc qdisc), receiver throughput, ping
+# latency, and observed loss.
 #
 # Usage:
 #   ./scripts/test-bandwidth-10g.sh [SRC] [DST] [RATE] [DURATION_SEC]
 #
 # Defaults:
 #   SRC=iot-1  DST=cloud  RATE=10000Mbit  DURATION_SEC=300
+#
+# Optional environment overrides:
+#   LATENCY=20ms   — adds netem delay (e.g. "20ms", "100ms")
+#   JITTER=5ms     — netem jitter (default 0ms, requires LATENCY)
+#   LOSS=0.5       — packet loss in percent (e.g. "0.5", "1", "2.5")
 
 set -uo pipefail
 
@@ -19,6 +24,10 @@ DST="${2:-cloud}"
 RATE="${3:-10000Mbit}"
 DURATION="${4:-300}"
 NS="arena-net"
+
+LATENCY="${LATENCY:-}"
+JITTER="${JITTER:-0ms}"
+LOSS="${LOSS:-}"
 
 # ─── color helpers ─────────────────────────────────────────────
 if [[ -t 1 ]]; then
@@ -77,7 +86,26 @@ fi
 ok "$RATE → $CHAOS_RATE (= ${BITS} bit/s)"
 
 # ─── 4. apply NetworkChaos ─────────────────────────────────────
-step "4. Apply NetworkChaos (action: netem, rate=$CHAOS_RATE)"
+# Build the spec progressively so optional delay/loss are only included
+# when the user set them via env vars.
+DESC="rate=$CHAOS_RATE"
+DELAY_BLOCK=""
+LOSS_BLOCK=""
+if [[ -n "$LATENCY" ]]; then
+  DESC="$DESC, latency=$LATENCY (jitter=$JITTER)"
+  DELAY_BLOCK="  delay:
+    latency: \"$LATENCY\"
+    jitter: \"$JITTER\""
+fi
+if [[ -n "$LOSS" ]]; then
+  LOSS_PCT="${LOSS%\%}"   # accept "0.5" or "0.5%"
+  DESC="$DESC, loss=$LOSS_PCT%"
+  LOSS_BLOCK="  loss:
+    loss: \"$LOSS_PCT\"
+    correlation: \"0\""
+fi
+
+step "4. Apply NetworkChaos (action: netem, $DESC)"
 cat <<EOF | kubectl apply -f -
 apiVersion: chaos-mesh.org/v1alpha1
 kind: NetworkChaos
@@ -98,6 +126,8 @@ spec:
       namespaces: [$NS]
       labelSelectors:
         arena.node: $DST
+$DELAY_BLOCK
+$LOSS_BLOCK
   rate:
     rate: $CHAOS_RATE
 EOF
@@ -110,11 +140,22 @@ PHASE=$(kubectl get networkchaos -n "$NS" "bw-test-$SRC-to-$DST" -o json 2>/dev/
 [[ "$PHASE" == "Injected" ]] && ok "chaos Injected" \
   || warn "phase=$PHASE (continuing anyway)"
 
-# ─── 5. dump tc rule from inside the source pod ───────────────
+# ─── 5. dump tc rule + ping latency from inside the source pod ───────────
 step "5. Confirm tc qdisc on $SRC pod"
 kubectl exec -n "$NS" deploy/probe-"$SRC" -- sh -c \
   '(apk add iproute2 >/dev/null 2>&1 || true); tc qdisc show dev eth0' 2>/dev/null \
   | head -10 || warn "could not dump tc qdisc"
+
+# Measure delay via ping (10 packets, quick).
+PING_RTT=$(kubectl exec -n "$NS" deploy/probe-"$SRC" -- \
+  ping -c 10 -q "$DST_IP" 2>/dev/null | awk -F'/' '/^rtt/{print $5}')
+if [[ -n "$LATENCY" ]]; then
+  LAT_MS=$(echo "$LATENCY" | sed 's/ms//')
+  EXPECTED_RTT=$(awk -v l="$LAT_MS" 'BEGIN{printf "%.0f", l*2}')
+  ok "ping RTT = ${PING_RTT} ms (expected ≈ ${EXPECTED_RTT} ms = 2 × latency)"
+else
+  ok "ping RTT = ${PING_RTT} ms (no delay injected)"
+fi
 
 # ─── 6. run iperf3 UDP for DURATION seconds ───────────────────
 step "6. iperf3 UDP -P 4 -t $DURATION (target $RATE)"
@@ -158,12 +199,36 @@ else
   SHAPER_OUT_MBIT="?"
 fi
 
+# Re-measure ping after the load test (more accurate, jitter visible).
+PING_AFTER=$(kubectl exec -n "$NS" deploy/probe-"$SRC" -- \
+  ping -c 20 -q "$DST_IP" 2>/dev/null | awk -F'/' '/^rtt/{print "min="$4" avg="$5" max="$6" mdev="$7}')
+
 echo
-printf "  Expected shaper      : ${G}%-15s${X}\n" "$RATE"
-printf "  iperf3 sender push   : ${G}%-15s${X}  (app-layer rate, NOT shaper egress)\n" "$SUM_SENT"
-printf "  ${G}Shaper egress (tc Sent)${X}: ${G}%-15s${X}  ← ground truth of what shaper released\n" "${SHAPER_OUT_MBIT} Mbit/s"
-printf "  Receiver ingress     : ${G}%-15s${X}\n" "$SUM_RECV"
-printf "  UDP loss (receiver)  : ${G}%-15s${X}\n" "${SUM_LOSS:-?}"
+echo "  ${B}─── BANDWIDTH ───${X}"
+printf "    Expected shaper          : ${G}%-15s${X}\n" "$RATE"
+printf "    iperf3 sender push       : ${G}%-15s${X}  (NOT shaper egress)\n" "$SUM_SENT"
+printf "    ${G}Shaper egress (tc Sent)${X} : ${G}%-15s${X}  ← ground truth\n" "${SHAPER_OUT_MBIT} Mbit/s"
+printf "    Receiver ingress         : ${G}%-15s${X}\n" "$SUM_RECV"
+
+echo
+echo "  ${B}─── DELAY (RTT) ───${X}"
+if [[ -n "$LATENCY" ]]; then
+  LAT_MS=$(echo "$LATENCY" | sed 's/ms//')
+  EXPECTED_RTT=$(awk -v l="$LAT_MS" 'BEGIN{printf "%.0f", l*2}')
+  printf "    Expected RTT             : ${G}%-15s${X}  (= 2 × $LATENCY one-way)\n" "${EXPECTED_RTT} ms"
+else
+  printf "    Expected RTT             : ${G}%-15s${X}  (no delay injected)\n" "baseline"
+fi
+printf "    Measured ping (ping -c 20): ${G}%s${X}\n" "${PING_AFTER:-?}"
+
+echo
+echo "  ${B}─── LOSS ───${X}"
+if [[ -n "$LOSS" ]]; then
+  printf "    Expected loss            : ${G}%-15s${X}\n" "${LOSS%\%}%"
+else
+  printf "    Expected loss            : ${G}%-15s${X}  (no loss injected)\n" "~0%"
+fi
+printf "    iperf3 UDP loss          : ${G}%-15s${X}  (includes shaper drops)\n" "${SUM_LOSS:-?}"
 
 # tc final counters (full dump for forensic)
 echo
