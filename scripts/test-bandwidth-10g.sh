@@ -117,14 +117,21 @@ kubectl exec -n "$NS" deploy/probe-"$SRC" -- sh -c \
   | head -10 || warn "could not dump tc qdisc"
 
 # ─── 6. run iperf3 UDP for DURATION seconds ───────────────────
-step "6. iperf3 UDP -P 8 -t $DURATION (target $RATE)"
-# Try to push slightly more than the shaper to confirm it caps
-PUSH_BIT=$(awk "BEGIN{printf \"%.0f\", $BITS*1.1}")
-PUSH_MBIT=$(awk "BEGIN{printf \"%.0f\", $PUSH_BIT/1e6}")
-echo "    pushing ${PUSH_MBIT}M (= 110% of $RATE) for ${DURATION}s..."
+step "6. iperf3 UDP -P 4 -t $DURATION (target $RATE)"
+# Push 110% of the shaper rate IN TOTAL (not per stream).
+# iperf3 -b X -P N sends X per stream → total = X×N. Divide accordingly
+# so we don't over-push by 8× and overflow the netem queue (limit=1000).
+STREAMS=4
+PUSH_TOTAL_BIT=$(awk "BEGIN{printf \"%.0f\", $BITS*1.1}")
+PUSH_PER_STREAM_BIT=$(awk "BEGIN{printf \"%.0f\", $PUSH_TOTAL_BIT/$STREAMS}")
+PUSH_PER_STREAM_MBIT=$(awk "BEGIN{printf \"%.0f\", $PUSH_PER_STREAM_BIT/1e6}")
+# iperf3 needs at least 1 Mbit/s per stream
+if (( PUSH_PER_STREAM_MBIT < 1 )); then PUSH_PER_STREAM_MBIT=1; fi
+PUSH_TOTAL_MBIT=$(( PUSH_PER_STREAM_MBIT * STREAMS ))
+echo "    pushing ${PUSH_TOTAL_MBIT}M total = ${PUSH_PER_STREAM_MBIT}M × ${STREAMS} streams (= ~110% of $RATE)"
 
 OUT=$(kubectl exec -n "$NS" deploy/probe-"$SRC" -- \
-  iperf3 -u -c "$DST_IP" -b "${PUSH_MBIT}M" -P 8 -t "$DURATION" -f m 2>&1) \
+  iperf3 -u -c "$DST_IP" -b "${PUSH_PER_STREAM_MBIT}M" -P "$STREAMS" -t "$DURATION" -f m 2>&1) \
   || warn "iperf3 returned non-zero"
 
 # ─── 7. parse + report ─────────────────────────────────────────
