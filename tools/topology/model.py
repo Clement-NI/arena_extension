@@ -7,7 +7,21 @@ into regions, plus three layers of rules from broadest to narrowest:
     region_pairs         per (src_region, dst_region) override
     exceptions           per (src_node,   dst_node)   override
 
-Each rule is a partial metric dict: any of {latency, bw, loss, jitter}.
+Each rule is a partial metric dict. Supported keys:
+
+    latency      one-way delay (e.g. "20ms")
+    jitter       delay variation (e.g. "5ms", requires latency)
+    bw           bandwidth shaper (e.g. "100Mbit", "1Gbit")
+    loss         random packet loss percentage (e.g. "0.5")
+    duplicate    packet duplication percentage (e.g. "1")
+    corrupt      packet corruption percentage (e.g. "0.1")
+    partition    "true" to fully block the link (separate Chaos action)
+    correlation  correlation factor for delay (0-100, optional)
+
+delay/loss/duplicate/corrupt/bandwidth share one composite NetworkChaos
+with action: netem. partition is emitted as its own resource with
+action: partition.
+
 Missing fields are inherited from the next-broader layer at resolve time.
 """
 
@@ -17,7 +31,10 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 
 
-METRIC_KEYS = ("latency", "bw", "loss", "jitter")
+METRIC_KEYS = (
+    "latency", "bw", "loss", "jitter",
+    "duplicate", "corrupt", "partition", "correlation",
+)
 
 
 @dataclass(frozen=True)

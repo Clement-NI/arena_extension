@@ -4,10 +4,17 @@ Targets pods via the arena.node label that 1-launch_cluster.sh stamps
 onto every kind node (and that callers are expected to propagate to
 their app pods via the same label, see examples/probes.yaml).
 
-We use `action: netem` (composite) when latency / loss / bandwidth need
-to coexist on the same pair. Per Chaos Mesh docs, `action: bandwidth`
-(tbf-backed) is *mutually exclusive* with any netem field, so we route
-all three through netem's built-in `rate` for bandwidth shaping.
+For each resolved link, up to TWO NetworkChaos resources are emitted:
+
+  1. A composite `action: netem` resource bundling delay / loss /
+     bandwidth (`rate`) / duplicate / corrupt — anything netem can do
+     in one go. Per Chaos Mesh docs, `action: bandwidth` (tbf-backed) is
+     mutually exclusive with netem fields, so bandwidth is routed
+     through netem's built-in `rate`.
+
+  2. A separate `action: partition` resource when partition: "true" is
+     set on the rule. partition fully blocks traffic in the given
+     direction and is its own Chaos Mesh action, not a netem feature.
 
 Notes on units:
 - Topology YAML expresses bandwidth in bits/s units (e.g. "100Mbit").
@@ -82,32 +89,64 @@ def _to_chaos_rate(bw: str) -> str:
     return f"{max(int(round(bits_per_sec)), 1)}bit"
 
 
-def _has_any(metric: Metric) -> bool:
-    return bool(metric.get("latency") or metric.get("loss") or metric.get("bw"))
-
-
-def _netem_resource(link: ResolvedLink, metric: Metric) -> Optional[Dict]:
-    """One composite NetworkChaos with action=netem combining delay+loss+rate."""
-    if not _has_any(metric):
+def _nonzero_pct(v) -> Optional[str]:
+    """Normalize a percentage value (str/num). Return string % or None if 0/empty."""
+    if v is None:
         return None
+    s = str(v).rstrip("%").strip()
+    if s == "" or s in ("0", "0.0"):
+        return None
+    return s
 
-    spec: Dict = {
-        "action": "netem",
+
+def _is_true(v) -> bool:
+    return str(v).strip().lower() in ("true", "1", "yes", "on")
+
+
+def _has_netem(metric: Metric) -> bool:
+    return bool(
+        metric.get("latency")
+        or _nonzero_pct(metric.get("loss"))
+        or _nonzero_pct(metric.get("duplicate"))
+        or _nonzero_pct(metric.get("corrupt"))
+        or metric.get("bw")
+    )
+
+
+def _base_spec(link: ResolvedLink, action: str) -> Dict:
+    return {
+        "action": action,
         "mode": "all",
         "selector": _selector(link.src.label),
         "direction": "to",
         "target": {"mode": "all", "selector": _selector(link.dst.label)},
     }
 
+
+def _netem_resource(link: ResolvedLink, metric: Metric) -> Optional[Dict]:
+    """Composite netem: delay + loss + bandwidth + duplicate + corrupt."""
+    if not _has_netem(metric):
+        return None
+
+    spec = _base_spec(link, "netem")
+    corr = str(metric.get("correlation", "0"))
+
     if metric.get("latency"):
         delay_block: Dict[str, str] = {"latency": metric["latency"]}
         if metric.get("jitter"):
             delay_block["jitter"] = metric["jitter"]
+        if "correlation" in metric:
+            delay_block["correlation"] = corr
         spec["delay"] = delay_block
 
-    loss = metric.get("loss")
-    if loss is not None and str(loss).rstrip("%") not in ("0", "0.0", ""):
-        spec["loss"] = {"loss": str(loss).rstrip("%"), "correlation": "0"}
+    if (loss := _nonzero_pct(metric.get("loss"))) is not None:
+        spec["loss"] = {"loss": loss, "correlation": corr}
+
+    if (dup := _nonzero_pct(metric.get("duplicate"))) is not None:
+        spec["duplicate"] = {"duplicate": dup, "correlation": corr}
+
+    if (cor := _nonzero_pct(metric.get("corrupt"))) is not None:
+        spec["corrupt"] = {"corrupt": cor, "correlation": corr}
 
     if metric.get("bw"):
         spec["rate"] = {"rate": _to_chaos_rate(metric["bw"])}
@@ -123,13 +162,29 @@ def _netem_resource(link: ResolvedLink, metric: Metric) -> Optional[Dict]:
     }
 
 
+def _partition_resource(link: ResolvedLink, metric: Metric) -> Optional[Dict]:
+    """Separate NetworkChaos with action=partition: blocks all traffic on link."""
+    if not _is_true(metric.get("partition")):
+        return None
+    return {
+        "apiVersion": "chaos-mesh.org/v1alpha1",
+        "kind": "NetworkChaos",
+        "metadata": {
+            "name": _name("partition", link.src.label, link.dst.label),
+            "namespace": CHAOS_NAMESPACE,
+        },
+        "spec": _base_spec(link, "partition"),
+    }
+
+
 def emit(links: List[ResolvedLink]) -> List[Dict]:
-    """One composite NetworkChaos per (src, dst) pair (vs. previous 3-per-pair)."""
+    """Up to 2 NetworkChaos per pair: netem (composite) + partition (separate)."""
     out: List[Dict] = []
     for L in links:
-        r = _netem_resource(L, L.metric)
-        if r is not None:
-            out.append(r)
+        for r in (_netem_resource(L, L.metric),
+                  _partition_resource(L, L.metric)):
+            if r is not None:
+                out.append(r)
     return out
 
 
