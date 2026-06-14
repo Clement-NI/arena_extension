@@ -13,9 +13,14 @@
 #   SRC=iot-1  DST=cloud  RATE=10000Mbit  DURATION_SEC=300
 #
 # Optional environment overrides:
-#   LATENCY=20ms   — adds netem delay (e.g. "20ms", "100ms")
-#   JITTER=5ms     — netem jitter (default 0ms, requires LATENCY)
-#   LOSS=0.5       — packet loss in percent (e.g. "0.5", "1", "2.5")
+#   LATENCY=20ms        — adds netem delay (e.g. "20ms", "100ms")
+#   JITTER=5ms          — netem jitter (default 0ms, requires LATENCY)
+#   LOSS=0.5            — packet loss in percent (e.g. "0.5", "1", "2.5")
+#   PUSH_TOTAL_MBIT=10000 — override iperf3 push rate (default = 110% of RATE).
+#                           Use high values (e.g. 10000) for low shapers to
+#                           force the shaper into saturation; avoid for high
+#                           shapers (>300 Mbit) where it overflows the netem
+#                           queue and reduces measured throughput.
 
 set -uo pipefail
 
@@ -158,18 +163,28 @@ else
 fi
 
 # ─── 6. run iperf3 UDP for DURATION seconds ───────────────────
-step "6. iperf3 UDP -P 4 -t $DURATION (target $RATE)"
+step "6. iperf3 UDP -P $STREAMS -t $DURATION (target $RATE)"
 # Push 110% of the shaper rate IN TOTAL (not per stream).
 # iperf3 -b X -P N sends X per stream → total = X×N. Divide accordingly
 # so we don't over-push by 8× and overflow the netem queue (limit=1000).
+#
+# For low shapers (< 200 Mbit), more push is harmless and gives sharper
+# proof that the shaper caps. For high shapers (>= 300 Mbit), overpush
+# overflows the netem queue and CPU-saturates the sender, REDUCING the
+# qdisc release rate. The default 1.1× is a safe compromise.
+#
+# Override with: PUSH_TOTAL_MBIT=10000 ./test-bandwidth-10g.sh ...
 STREAMS=4
-PUSH_TOTAL_BIT=$(awk "BEGIN{printf \"%.0f\", $BITS*1.1}")
-PUSH_PER_STREAM_BIT=$(awk "BEGIN{printf \"%.0f\", $PUSH_TOTAL_BIT/$STREAMS}")
-PUSH_PER_STREAM_MBIT=$(awk "BEGIN{printf \"%.0f\", $PUSH_PER_STREAM_BIT/1e6}")
-# iperf3 needs at least 1 Mbit/s per stream
+if [[ -n "${PUSH_TOTAL_MBIT:-}" ]]; then
+  ok "PUSH_TOTAL_MBIT override = ${PUSH_TOTAL_MBIT} Mbit/s"
+else
+  PUSH_TOTAL_BIT=$(awk "BEGIN{printf \"%.0f\", $BITS*1.1}")
+  PUSH_TOTAL_MBIT=$(awk "BEGIN{printf \"%.0f\", $PUSH_TOTAL_BIT/1e6}")
+fi
+PUSH_PER_STREAM_MBIT=$(( PUSH_TOTAL_MBIT / STREAMS ))
 if (( PUSH_PER_STREAM_MBIT < 1 )); then PUSH_PER_STREAM_MBIT=1; fi
 PUSH_TOTAL_MBIT=$(( PUSH_PER_STREAM_MBIT * STREAMS ))
-echo "    pushing ${PUSH_TOTAL_MBIT}M total = ${PUSH_PER_STREAM_MBIT}M × ${STREAMS} streams (= ~110% of $RATE)"
+echo "    pushing ${PUSH_TOTAL_MBIT}M total = ${PUSH_PER_STREAM_MBIT}M × ${STREAMS} streams"
 
 OUT=$(kubectl exec -n "$NS" deploy/probe-"$SRC" -- \
   iperf3 -u -c "$DST_IP" -b "${PUSH_PER_STREAM_MBIT}M" -P "$STREAMS" -t "$DURATION" -f m 2>&1) \
