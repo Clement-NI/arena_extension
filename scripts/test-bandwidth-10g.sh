@@ -151,9 +151,9 @@ kubectl exec -n "$NS" deploy/probe-"$SRC" -- sh -c \
   '(apk add iproute2 >/dev/null 2>&1 || true); tc qdisc show dev eth0' 2>/dev/null \
   | head -10 || warn "could not dump tc qdisc"
 
-# Measure delay via ping (10 packets, quick).
+# Measure delay via ping (10 packets, fast interval).
 PING_RTT=$(kubectl exec -n "$NS" deploy/probe-"$SRC" -- \
-  ping -c 10 -q "$DST_IP" 2>/dev/null | awk -F'/' '/^rtt/{print $5}')
+  ping -c 10 -i 0.2 -W 2 -q "$DST_IP" 2>/dev/null | awk -F'/' '/^rtt/{print $5}')
 if [[ -n "$LATENCY" ]]; then
   LAT_MS=$(echo "$LATENCY" | sed 's/ms//')
   EXPECTED_RTT=$(awk -v l="$LAT_MS" 'BEGIN{printf "%.0f", l*2}')
@@ -163,6 +163,7 @@ else
 fi
 
 # ─── 6. run iperf3 UDP for DURATION seconds ───────────────────
+STREAMS=4
 step "6. iperf3 UDP -P $STREAMS -t $DURATION (target $RATE)"
 # Push 110% of the shaper rate IN TOTAL (not per stream).
 # iperf3 -b X -P N sends X per stream → total = X×N. Divide accordingly
@@ -174,7 +175,6 @@ step "6. iperf3 UDP -P $STREAMS -t $DURATION (target $RATE)"
 # qdisc release rate. The default 1.1× is a safe compromise.
 #
 # Override with: PUSH_TOTAL_MBIT=10000 ./test-bandwidth-10g.sh ...
-STREAMS=4
 if [[ -n "${PUSH_TOTAL_MBIT:-}" ]]; then
   ok "PUSH_TOTAL_MBIT override = ${PUSH_TOTAL_MBIT} Mbit/s"
 else
@@ -215,8 +215,9 @@ else
 fi
 
 # Re-measure ping after the load test (more accurate, jitter visible).
+# -i 0.2: 200ms interval (vs 1s default) → 20 pings in 4s, not 20s
 PING_AFTER=$(kubectl exec -n "$NS" deploy/probe-"$SRC" -- \
-  ping -c 20 -q "$DST_IP" 2>/dev/null | awk -F'/' '/^rtt/{print "min="$4" avg="$5" max="$6" mdev="$7}')
+  ping -c 20 -i 0.2 -W 2 -q "$DST_IP" 2>/dev/null | awk -F'/' '/^rtt/{print "min="$4" avg="$5" max="$6" mdev="$7}')
 
 echo
 echo "  ${B}─── BANDWIDTH ───${X}"
