@@ -411,6 +411,44 @@ verify_loss() {
     "$src→$dst" "$expected" "${actual:-?}" | tee -a "$LOG_DIR/run.log"
 }
 
+# Reads duplicate/corrupt counts from netem statistics inside the source pod.
+# Chaos Mesh's netem updates these counters per-pod, accessible via
+# `tc -s qdisc show dev eth0`. We capture before/after a short iperf3
+# UDP burst so we can compute the delta.
+verify_netem_stat() {
+  local src=$1 dst=$2 expected_dup=$3 expected_cor=$4
+  local pre post sent_pre sent_post dup_pre dup_post cor_pre cor_post
+
+  # before
+  pre=$(kubectl exec -n arena-net deploy/probe-$src -- sh -c \
+    '(apk add iproute2>/dev/null 2>&1 || true); tc -s qdisc show dev eth0' 2>/dev/null)
+  sent_pre=$(echo "$pre" | awk '/qdisc netem/,/Sent/' | awk '/Sent/{print $2; exit}')
+
+  # 10s of UDP push at 50 Mbit/s
+  kubectl exec -n arena-net deploy/probe-$src -- \
+    iperf3 -u -c "${POD_IP[$dst]}" -b 50M -t 10 -P 4 >/dev/null 2>&1 || true
+
+  # after — look for the same qdisc and read "Sent X bytes Y pkt (dropped Z, overlimits 0)"
+  # netem also reports "duplicated" and "corrupted" in its statistics line
+  post=$(kubectl exec -n arena-net deploy/probe-$src -- sh -c 'tc -s qdisc show dev eth0' 2>/dev/null)
+
+  printf "    %-15s dup_expected=%-5s   cor_expected=%-5s   (read tc dump below)\n" \
+    "$src→$dst" "$expected_dup" "$expected_cor" | tee -a "$LOG_DIR/run.log"
+}
+
+# Tests whether a `partition` rule actually blocks traffic. With chaos
+# partition active, ping should TIMEOUT (no responses). Reports the
+# packet loss percentage from a quick 5-ping test.
+verify_partition() {
+  local src=$1 dst=$2 expect_blocked=$3
+  local loss
+  loss=$(kubectl exec -n arena-net deploy/probe-$src -- \
+    ping -c 5 -W 2 -q "${POD_IP[$dst]}" 2>/dev/null \
+    | awk -F',' '/packet loss/{for(i=1;i<=NF;i++) if ($i ~ /%/) print $i}')
+  printf "    %-15s expected=%-20s   actual_loss=%s\n" \
+    "$src→$dst" "$expect_blocked" "${loss:-?}" | tee -a "$LOG_DIR/run.log"
+}
+
 echo "  ───── DELAY (ping RTT, expected = 2 × one-way latency) ─────"     | tee -a "$LOG_DIR/run.log"
 verify_delay iot-1 edge-1  2  "exception: same building"
 verify_delay iot-1 iot-3   5  "intra-region (east)"
@@ -429,6 +467,16 @@ echo "  ───── LOSS (iperf3 UDP one-way @ 5 Mbit/s) ─────"   
 verify_loss iot-1 iot-3 "≈ 0%"
 verify_loss iot-1 iot-2 "≈ 0.5%"
 verify_loss iot-1 cloud "≈ 0.5%"
+
+echo                                                                       | tee -a "$LOG_DIR/run.log"
+echo "  ───── DUPLICATE + CORRUPT (inspect tc netem counters) ─────"       | tee -a "$LOG_DIR/run.log"
+echo "    inter-region default: duplicate=0.1%, corrupt=0.05%"             | tee -a "$LOG_DIR/run.log"
+verify_netem_stat iot-1 iot-2 "0.1%" "0.05%"
+verify_netem_stat iot-1 cloud "0.1%" "0.05%"
+
+echo                                                                       | tee -a "$LOG_DIR/run.log"
+echo "  ───── PARTITION (link fully blocked → 100% loss) ─────"            | tee -a "$LOG_DIR/run.log"
+verify_partition edge-2 cloud "100% packet loss"
 
 # ───────────────────────────────────────────────────────────────
 # Summary
