@@ -15,7 +15,7 @@
     {
       "context": "edge-host-1",
       "addr": "10.0.0.20",
-      "ssh": "ssh://root@10.0.0.20",
+      "ssh": "ssh://root@edge-host-1",
       "cpu": "8",
       "memory": "16Gi",
       "nodes": [
@@ -26,7 +26,7 @@
     {
       "context": "iot-host-1",
       "addr": "10.0.0.30",
-      "ssh": "ssh://root@10.0.0.30",
+      "ssh": "ssh://root@iot-host-1",
       "cpu": "4",
       "memory": "8Gi",
       "nodes": [
