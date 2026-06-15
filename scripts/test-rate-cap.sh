@@ -65,6 +65,35 @@ ok "src=$SRC  dst=$DST ($DST_IP)  cap=$RATE  duration=${DURATION}s  streams=$STR
 # Make sure no leftover chaos from a previous run skews the baseline.
 kubectl delete networkchaos -n "$NS" "$CHAOS_NAME" --ignore-not-found=true >/dev/null 2>&1
 
+# This A/B test only makes sense on a CLEAN link: any pre-existing
+# NetworkChaos (e.g. a full topology applied by run-experiment.sh step 13)
+# contaminates the Phase A baseline AND makes the tc Sent ground-truth
+# ambiguous (several netem qdiscs can share the same `rate`, so the rate
+# string is not a unique key for "this link's shaper").
+#
+# Detect any other NetworkChaos and offer to flush them. Set FLUSH_CHAOS=1
+# to delete without prompting, or FLUSH_CHAOS=0 to keep them (baseline will
+# NOT be clean — you have been warned).
+OTHER=$(kubectl get networkchaos -n "$NS" --no-headers 2>/dev/null \
+          | grep -v "^${CHAOS_NAME}\b" | awk '{print $1}')
+if [[ -n "$OTHER" ]]; then
+  N_OTHER=$(echo "$OTHER" | wc -l | tr -d ' ')
+  warn "$N_OTHER other NetworkChaos already on this cluster — baseline will NOT be clean"
+  echo "$OTHER" | sed 's/^/        /'
+  case "${FLUSH_CHAOS:-}" in
+    1) DO_FLUSH=y ;;
+    0) DO_FLUSH=n ;;
+    *) read -rp "  delete ALL NetworkChaos in $NS so the baseline is clean? [y/N] " DO_FLUSH ;;
+  esac
+  if [[ "$DO_FLUSH" =~ ^[Yy]$ ]]; then
+    kubectl delete networkchaos -n "$NS" --all >/dev/null 2>&1
+    ok "flushed — waiting 15 s for chaos-daemon to remove tc rules..."
+    sleep 15
+  else
+    warn "keeping existing chaos — Phase A is a SHAPED baseline, not the link ceiling"
+  fi
+fi
+
 # ─── 2. Phase A — baseline (NO chaos, saturate) ────────────────
 step "2. Phase A — BASELINE (no chaos, saturate with iperf3 TCP -P $STREAMS)"
 BASELINE_BW=$(saturate_tcp)
