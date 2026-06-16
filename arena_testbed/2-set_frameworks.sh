@@ -1,49 +1,32 @@
 #!/usr/bin/env bash
 # Installs Cilium + Prometheus + Chaos Mesh.
 #
-# Cilium install adapts to the topology declared in nodes.json:
-#   - multi-host (>= 2 physical hosts): the cluster runs on a Docker Swarm
-#     overlay where the kube-proxy ClusterIP path (10.96.0.1) is unreliable,
-#     so we point Cilium straight at the apiserver's overlay IP and let it
-#     replace kube-proxy (k8sServiceHost + kubeProxyReplacement).
-#   - single-host: plain install (kube-proxy works fine on the bridge).
-
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-NODES_JSON="${NODES_JSON:-$SCRIPT_DIR/nodes.json}"
-HOST_COUNT=$(jq '.hosts | length' "$NODES_JSON" 2>/dev/null || echo 1)
+# Cilium is installed the plain way for BOTH single- and multi-host.
+# The multi-host requirement is simply that every physical host runs the
+# SAME docker version so the Docker Swarm overlay forwards cross-host
+# traffic symmetrically; once that holds, kube-proxy + plain Cilium work
+# fine. We do NOT use kubeProxyReplacement: replacing kube-proxy on a live
+# cluster flushes its rules and breaks the worker kubelet -> apiserver
+# heartbeat, flapping nodes between Ready/NotReady ("Kubelet stopped
+# posting node status").
 
 helm repo add cilium https://helm.cilium.io/
 helm repo update
 
-# Common flags shared by both single- and multi-host installs.
-CILIUM_COMMON=(
-  --version 1.17.6
-  --namespace kube-system
-  --set operator.replicas=1
-  --set operator.nodeSelector."node-role\.kubernetes\.io/control-plane"=""
-  --set operator.tolerations[0].key=node-role.kubernetes.io/control-plane
-  --set operator.tolerations[0].operator=Exists
-  --set operator.tolerations[0].effect=NoSchedule
-  --set operator.tolerations[1].key=node.kubernetes.io/not-ready
-  --set operator.tolerations[1].operator=Exists
-  --set operator.tolerations[1].effect=NoSchedule
-  --set operator.tolerations[2].key=node.kubernetes.io/unreachable
-  --set operator.tolerations[2].operator=Exists
+helm install cilium cilium/cilium \
+  --version 1.17.6 \
+  --namespace kube-system \
+  --set operator.replicas=1 \
+  --set operator.nodeSelector."node-role\.kubernetes\.io/control-plane"="" \
+  --set operator.tolerations[0].key=node-role.kubernetes.io/control-plane \
+  --set operator.tolerations[0].operator=Exists \
+  --set operator.tolerations[0].effect=NoSchedule \
+  --set operator.tolerations[1].key=node.kubernetes.io/not-ready \
+  --set operator.tolerations[1].operator=Exists \
+  --set operator.tolerations[1].effect=NoSchedule \
+  --set operator.tolerations[2].key=node.kubernetes.io/unreachable \
+  --set operator.tolerations[2].operator=Exists \
   --set operator.tolerations[2].effect=NoExecute
-)
-
-if [[ "${HOST_COUNT:-1}" -ge 2 ]]; then
-  # control-plane overlay IP (e.g. 10.0.1.x) that every node can reach.
-  CPIP=$(kubectl get nodes -l node-role.kubernetes.io/control-plane \
-    -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
-  echo "[INFO] multi-host ($HOST_COUNT hosts): Cilium k8sServiceHost=$CPIP kubeProxyReplacement=true"
-  helm install cilium cilium/cilium "${CILIUM_COMMON[@]}" \
-    --set k8sServiceHost="$CPIP" --set k8sServicePort=6443 \
-    --set kubeProxyReplacement=true
-else
-  echo "[INFO] single-host: plain Cilium install"
-  helm install cilium cilium/cilium "${CILIUM_COMMON[@]}"
-fi
 
 echo "wait 30 secs"
 for i in $(seq 30 -1 1); do
