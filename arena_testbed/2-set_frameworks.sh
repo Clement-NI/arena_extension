@@ -26,7 +26,10 @@ helm install cilium cilium/cilium \
   --set operator.tolerations[1].effect=NoSchedule \
   --set operator.tolerations[2].key=node.kubernetes.io/unreachable \
   --set operator.tolerations[2].operator=Exists \
-  --set operator.tolerations[2].effect=NoExecute 
+  --set operator.tolerations[2].effect=NoExecute \
+  --set k8sServiceHost=172.16.193.6 \
+  --set k8sServicePort=6443 \
+  --set ipam.mode=kubernetes
 
 echo "wait 30 secs"
 for i in $(seq 30 -1 1); do
