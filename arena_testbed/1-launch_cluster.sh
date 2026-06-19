@@ -126,7 +126,14 @@ HOSTS_BUILT=$(echo "$HOSTS_BUILT" | jq '
 #   - worker cilium-agents can reach the apiserver over the physical network
 #     at this IP (k8sServiceHost in 2-set_frameworks.sh uses the same value)
 # The IP is the single source of truth in nodes.json — nothing is hardcoded.
+# Fallback: if the manager host (hosts[0]) has no usable addr, auto-detect this
+# machine's IP (the manager always runs locally on the default context), so the
+# apiserver still gets published on a reachable IP without editing nodes.json.
 MGR_ADDR=$(jq -r '.hosts[0].addr // ""' "$CONFIG_FILE")
+if [[ "$HOSTS_LEN" -ge 2 && ( -z "$MGR_ADDR" || "$MGR_ADDR" == "127.0.0.1" ) ]]; then
+  MGR_ADDR=$(hostname -I | awk '{print $1}')
+  log_info "manager addr missing in nodes.json — auto-detected ${MGR_ADDR}"
+fi
 if [[ "$HOSTS_LEN" -ge 2 && -n "$MGR_ADDR" && "$MGR_ADDR" != "127.0.0.1" ]]; then
   jq --argjson hosts "$HOSTS_BUILT" --arg mgr "$MGR_ADDR" '
     .hosts = ($hosts | map({context, addr, nodes}))
