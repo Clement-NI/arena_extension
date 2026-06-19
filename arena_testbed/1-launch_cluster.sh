@@ -117,8 +117,26 @@ HOSTS_BUILT=$(echo "$HOSTS_BUILT" | jq '
   map(.context as $ctx | .nodes |= map(.labels."arena.host" = $ctx))
 ')
 
-# Inject into the cluster template
-jq --argjson hosts "$HOSTS_BUILT" '.hosts = ($hosts | map({context, addr, nodes}))' "$TEMPLATE_FILE" > "$OUTPUT_FILE"
+# Inject hosts into the cluster template.
+#
+# For multi-host we also publish the apiserver on the MANAGER's externally
+# reachable IP (hosts[0].addr) instead of kind's default 127.0.0.1 bind, by
+# setting networking.apiServerAddress. This means:
+#   - kubectl on the manager works directly (no 127.0.0.1 kubeconfig hack)
+#   - worker cilium-agents can reach the apiserver over the physical network
+#     at this IP (k8sServiceHost in 2-set_frameworks.sh uses the same value)
+# The IP is the single source of truth in nodes.json — nothing is hardcoded.
+MGR_ADDR=$(jq -r '.hosts[0].addr // ""' "$CONFIG_FILE")
+if [[ "$HOSTS_LEN" -ge 2 && -n "$MGR_ADDR" && "$MGR_ADDR" != "127.0.0.1" ]]; then
+  jq --argjson hosts "$HOSTS_BUILT" --arg mgr "$MGR_ADDR" '
+    .hosts = ($hosts | map({context, addr, nodes}))
+    | .networking.apiServerAddress = $mgr
+    | .networking.apiServerPort = (.networking.apiServerPort // 6443)
+  ' "$TEMPLATE_FILE" > "$OUTPUT_FILE"
+  log_info "Multi-host: apiserver published on ${MGR_ADDR}:$(jq -r '.networking.apiServerPort' "$OUTPUT_FILE")"
+else
+  jq --argjson hosts "$HOSTS_BUILT" '.hosts = ($hosts | map({context, addr, nodes}))' "$TEMPLATE_FILE" > "$OUTPUT_FILE"
+fi
 log_info "Kind config written to $OUTPUT_FILE"
 
 # Display the placement plan
