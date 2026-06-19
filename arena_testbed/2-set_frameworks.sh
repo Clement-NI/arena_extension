@@ -26,7 +26,7 @@ helm install cilium cilium/cilium \
   --set operator.tolerations[1].effect=NoSchedule \
   --set operator.tolerations[2].key=node.kubernetes.io/unreachable \
   --set operator.tolerations[2].operator=Exists \
-  --set operator.tolerations[2].effect=NoExecute
+  --set operator.tolerations[2].effect=NoExecute 
 
 echo "wait 30 secs"
 for i in $(seq 30 -1 1); do
