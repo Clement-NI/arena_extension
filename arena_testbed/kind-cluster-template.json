@@ -4,7 +4,7 @@
   "name": "arena-testbed",
   "networking": {
     "disableDefaultCNI": true,
-    "apiServerAddress": "172.16.193.34",
+    "apiServerAddress": "172.16.193.4",
     "apiServerPort": 6443
   },
   "hosts": []
