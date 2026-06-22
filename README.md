@@ -10,7 +10,6 @@ This repository contains the Arena setup scripts and experiment code used in the
 - `experiments/experiments2`: validates the network chaos injection mechanism.
 - `tools/topology/`: region-based topology compiler. Reads a `topology.yaml` declaring regions + per-region-pair rules + per-node-pair exceptions, emits NetworkChaos / probe deployments / CSV / Mermaid. See `tools/topology/README.md`.
 - `examples/`: sample `nodes.json` (3-tier with multiple instances per tier) and matching `topology.yaml`.
-- `scripts/verify-topology.sh`: ping every worker→worker pair after applying the topology, report PASS/FAIL per link against the expected latency.
 
 ## Node labels
 
@@ -37,8 +36,8 @@ round-robin.
 Prerequisites:
 - `git`, Debian 11, Docker reachable on the manager host.
 - For multi-host runs: SSH access (key auth, `root@<host>`) from the
-  manager to every worker host. Use the fork's
-  `scripts/setup-multihost.sh` to propagate the SSH key and create the
+  manager to every worker host. You can also use the fork's
+  `scripts/setup-multihost.sh` or `arena_testbed/0b-setup-multihost.sh` to propagate the SSH key and create the
   docker contexts in one go.
 
 ```bash
@@ -48,6 +47,8 @@ cd arena_extension/arena_testbed
 
 # Builds kind from the fork; tells you how to bootstrap SSH/contexts
 ./0-set_environments.sh
+# If you wanna start arena in multi-host mode, you can use this script to generate the docker context
+./0b-setup-multihost.sh
 
 # If you have remote hosts in nodes.json, run from this machine:
 #   bash /opt/kind_extension_for_arena/scripts/setup-multihost.sh \
@@ -69,37 +70,32 @@ Kubernetes nodes that run on it**. There is no top-level `nodes:` list;
 that placement is intentional.
 
 ```json
+MGR_IP=$(hostname -I | awk '{print $1}')
+mapfile -t W < <(docker context ls --format '{{.Name}}' | grep -v '^default$')
+echo "manager=$MGR_IP  worker1=${W[0]}  worker2=${W[1]}"
+W0_IP=$(ssh root@${W[0]} "hostname -I | awk '{print \$1}'")
+W1_IP=$(ssh root@${W[1]} "hostname -I | awk '{print \$1}'")
+echo "${W[0]}=$W0_IP   ${W[1]}=$W1_IP"
+
 {
   "cluster_name": "arena-testbed",
   "hosts": [
-    {
-      "context": "default",
-      "addr": "127.0.0.1",
+    { "context": "default", "addr": "$MGR_IP", "ssh": "",
       "nodes": [
-        { "name": "Cloud",      "role": "worker",        "cpu": "8", "memory": "16Gi" },
-        { "name": "Controller", "role": "control-plane", "cpu": "8", "memory": "16Gi" }
-      ]
-    },
-    {
-      "context": "edge-host-1",
-      "addr": "10.0.0.30",
-      "ssh":  "ssh://root@10.0.0.30",
-      "cpu":  "4",
-      "memory": "8Gi",
+        { "name": "Controller", "tier": "Controller", "role": "control-plane", "cpu": "4", "memory": "8Gi" },
+        { "name": "Cloud", "tier": "Cloud", "role": "worker", "cpu": "8", "memory": "16Gi" }
+      ]},
+    { "context": "${W[0]}", "addr": "$W0_IP", "ssh": "ssh://root@${W[0]}",
       "nodes": [
-        { "name": "Edge", "role": "worker", "cpu": "2", "memory": "4Gi" }
-      ]
-    },
-    {
-      "context": "iot-host-1",
-      "addr": "10.0.0.20",
-      "ssh":  "ssh://root@10.0.0.20",
-      "cpu":  "2",
-      "memory": "4Gi",
+        { "name": "Edge-1", "tier": "Edge", "role": "worker", "cpu": "2", "memory": "4Gi" },
+        { "name": "Edge-2", "tier": "Edge", "role": "worker", "cpu": "2", "memory": "4Gi" }
+      ]},
+    { "context": "${W[1]}", "addr": "$W1_IP", "ssh": "ssh://root@${W[1]}",
       "nodes": [
-        { "name": "IoT", "role": "worker", "cpu": "1", "memory": "2Gi" }
-      ]
-    }
+        { "name": "IoT-1", "tier": "IoT", "role": "worker", "cpu": "1", "memory": "2Gi" },
+        { "name": "IoT-2", "tier": "IoT", "role": "worker", "cpu": "1", "memory": "2Gi" },
+        { "name": "IoT-3", "tier": "IoT", "role": "worker", "cpu": "1", "memory": "2Gi" }
+      ]}
   ]
 }
 ```
