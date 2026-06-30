@@ -1,0 +1,19 @@
+# Arena AI agent dependencies.
+# Install with:  pip install -r ai_agent/requirements.txt
+
+# Agent framework (LangChain v1 `create_agent` + middleware + LangGraph runtime)
+langchain>=1.0.0
+langgraph>=1.0.0
+
+# Model providers — keep the one(s) you actually use.
+# init_chat_model() picks the backend from the model string, e.g.
+#   "anthropic:claude-opus-4-8"  or  "openai:gpt-4.1"
+langchain-anthropic>=0.3.0
+langchain-openai>=0.2.0
+google-genai >= 0.2.0
+
+# Config generation / validation (reuses tools/topology, which needs PyYAML)
+pyyaml>=6.0
+
+# Loads ai_agent/.env into the environment
+python-dotenv>=1.0.0
