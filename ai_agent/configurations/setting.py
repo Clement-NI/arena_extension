@@ -2,7 +2,7 @@ import os
 
 # Optional: override the default model (provider-prefixed id).
 #  anthropic:claude-opus-4-8   openai:gpt-4.1   openai:gpt-5
-# ARENA_AGENT_MODEL=anthropic:claude-opus-4-8 google_genai:gemini-3.5-flash
+#  anthropic:claude-opus-4-8 google_genai:gemini-3.5-flash
 DEFAULT_MODEL = "google_genai:gemini-3.5-flash"
 
 ## Setting of the LLM
