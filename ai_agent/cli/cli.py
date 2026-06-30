@@ -12,8 +12,6 @@ from __future__ import annotations
 import uuid
 
 from langchain_core.messages import HumanMessage
-from langgraph.checkpoint.memory import InMemorySaver
-
 from ai_agent.ai_chatbot import build_agent
 
 
@@ -23,7 +21,7 @@ def run() -> None:
     Conversation memory is kept in-process via an InMemorySaver keyed on a
     single thread id, so the agent remembers earlier turns within this session.
     """
-    agent = build_agent(checkpointer=InMemorySaver())
+    agent = build_agent()
     config = {"configurable": {"thread_id": str(uuid.uuid4())}}
 
     print("Arena AI agent ready. Describe a scenario, or type 'exit' to quit.\n")
