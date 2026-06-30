@@ -10,5 +10,6 @@ temperature = 0.5
 model_time_out  = 600
 max_token = 25000
 streaming = True
+max_retries = 10
 
 
