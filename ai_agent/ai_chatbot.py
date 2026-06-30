@@ -34,13 +34,17 @@ def build_agent(
 ):
 
     model_use = model or DEFAULT_MODEL
-    llm = init_chat_model(
-        model_use,
-        temperature= temperature,
-        timeout=model_time_out,
-        max_tokens=max_token,
-        streaming= streaming,
-    )
+    if isinstance(model_use, str):
+        llm = init_chat_model(
+            model_use,
+            temperature= temperature,
+            timeout=model_time_out,
+            max_tokens=max_token,
+            streaming= streaming,
+        )
+    else:
+        # Already a constructed chat model object — use it directly.
+        llm = model_use
 
     middleware = []
     if human_in_the_loop:
