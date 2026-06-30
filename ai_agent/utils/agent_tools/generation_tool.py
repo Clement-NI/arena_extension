@@ -25,14 +25,14 @@ def write_config_file(path: str, content: str) -> str:
     is auditable rather than buried in chat. Parent directories are created.
 
     Args:
-        path: destination path, e.g. "ai_agent/out/nodes.json".
+        path: destination path, e.g. "arena_extension/ai_agent/out/nodes.json".
         content: the complete file contents to write.
 
     Returns:
         A confirmation string with the path and byte count.
     """
     p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
+    # p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content)
     return f"wrote {p} ({len(content)} bytes)"
 
