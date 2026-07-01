@@ -12,7 +12,7 @@ from __future__ import annotations
 import uuid
 
 from langchain_core.messages import HumanMessage
-from ai_agent.ai_chatbot import build_agent
+from ai_agent.ai_chatbot.ai_chatbot import build_agent
 
 
 def run() -> None:
