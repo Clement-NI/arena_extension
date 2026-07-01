@@ -28,7 +28,7 @@ def write_config_file(path: str, content: Union[str, dict, list]) -> str:
     is auditable rather than buried in chat. Parent directories are created.
 
     Args:
-        path: destination, e.g. "ai_agent/out/nodes.json".
+        path: destination, e.g. "out/nodes.json".
         content: the file contents. Preferably a ready-to-write string, but a
             dict/list is also accepted and will be serialized (JSON for .json,
             YAML for .yaml/.yml).
