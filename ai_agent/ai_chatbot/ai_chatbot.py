@@ -66,3 +66,13 @@ def build_agent(
     )
 
 
+def make_graph():
+    """Graph factory for `langgraph dev` / LangGraph API.
+
+    The langgraph runtime supplies its own persistence, so the graph it serves
+    must NOT carry a checkpointer (a custom one raises at serve time). The CLI
+    keeps using build_agent() with its in-memory checkpointer for local chat.
+    """
+    return build_agent(checkpointer=None)
+
+
