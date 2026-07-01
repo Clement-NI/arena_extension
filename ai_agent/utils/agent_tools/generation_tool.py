@@ -32,7 +32,7 @@ def write_config_file(path: str, content: str) -> str:
         A confirmation string with the path and byte count.
     """
     p = Path(path)
-    # p.parent.mkdir(parents=True, exist_ok=True)
+    p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content)
     return f"wrote {p} ({len(content)} bytes)"
 

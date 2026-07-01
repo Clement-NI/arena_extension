@@ -20,12 +20,13 @@ from langchain.agents.middleware import HumanInTheLoopMiddleware
 from ai_agent.system_prompts.system_prompt import SYSTEM_PROMPT
 from ai_agent.utils.tools import ALL_TOOLS
 
-from ai_agent.configurations.setting import DEFAULT_MODEL,temperature,streaming,model_time_out,max_token
+from ai_agent.configurations.setting import DEFAULT_MODEL,temperature,streaming,model_time_out,max_token,max_retries
 from langgraph.checkpoint.memory import InMemorySaver
 from dotenv import load_dotenv
 
-## load from the .env the environment variables
-load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+## load from the .env the environment variables.
+## This module lives in ai_agent/ai_chatbot/, so the .env is one level up (ai_agent/.env).
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 ## initialize and build the model with model.
 def build_agent(
     model: Optional[Union[str, object]] = None,
@@ -41,6 +42,7 @@ def build_agent(
             timeout=model_time_out,
             max_tokens=max_token,
             streaming= streaming,
+            max_retries=max_retries,
         )
     else:
         # Already a constructed chat model object — use it directly.
