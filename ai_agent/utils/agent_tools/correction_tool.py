@@ -18,10 +18,12 @@ def validate_topology(topology_yaml_path: str, nodes_json_path: str) -> str:
     """Validate a topology.yaml against a nodes.json using Arena's own loader.
 
     This catches both kinds of error the prompt cares about:
+      - number : if the number of nodes does match
       - structural/grammatical: malformed YAML/JSON, missing required keys,
         unknown metric keys.
       - semantic: a region member or exception endpoint that is not a real node,
         a node listed in two regions, an unsupported version, etc.
+
 
     The loader reports path-style locations (e.g. "region_pairs[2]: unknown
     region 'X'") so the agent can fix the exact offending field and re-validate.
