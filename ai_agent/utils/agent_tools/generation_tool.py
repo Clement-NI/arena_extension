@@ -25,7 +25,7 @@ def write_config_file(path: str, content: str) -> str:
     is auditable rather than buried in chat. Parent directories are created.
 
     Args:
-        path: destination path, e.g. "arena_extension/ai_agent/out/nodes.json".
+        path: "arena_extension/ai_agent/out/nodes.json".
         content: the complete file contents to write.
 
     Returns:
@@ -45,7 +45,7 @@ def compile_topology(topology_yaml_path: str, nodes_json_path: str, fmt: str = "
     topology compiler instead of letting the model write Chaos Mesh YAML.
 
     Args:
-        topology_yaml_path: path to the topology.yaml.
+        topology_yaml_path: path to the topology.yaml. (default : "arena_extension/ai_agent/out/nodes.json")
         nodes_json_path: path to the nodes.json.
         fmt: "csv" for the resolved (src,dst,latency,bw,loss) matrix preview, or
             "chaosmesh" for the NetworkChaos manifests.
