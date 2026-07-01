@@ -6,8 +6,11 @@ It should detect what we need and what we lack and ask us how to do.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from typing import Union
 
+import yaml
 from langchain_core.tools import tool
 
 from tools.topology.compiler import compile as _compile
@@ -17,7 +20,7 @@ from tools.topology.schema import load_topology
 
 
 @tool
-def write_config_file(path: str, content: str) -> str:
+def write_config_file(path: str, content: Union[str, dict, list]) -> str:
     """Write generated Arena configuration to disk.
 
     Use this for nodes.json and topology.yaml once you have composed their full
@@ -25,12 +28,23 @@ def write_config_file(path: str, content: str) -> str:
     is auditable rather than buried in chat. Parent directories are created.
 
     Args:
-        path: "arena_extension/ai_agent/out/nodes.json".
-        content: the complete file contents to write.
+        path: destination, e.g. "ai_agent/out/nodes.json".
+        content: the file contents. Preferably a ready-to-write string, but a
+            dict/list is also accepted and will be serialized (JSON for .json,
+            YAML for .yaml/.yml).
 
     Returns:
         A confirmation string with the path and byte count.
     """
+    # Many models (especially local/Ollama ones) pass structured content as a
+    # dict/list instead of a serialized string. Normalize it so the tool call
+    # doesn't fail schema validation and the file still gets written.
+    if not isinstance(content, str):
+        if str(path).lower().endswith((".yaml", ".yml")):
+            content = yaml.safe_dump(content, sort_keys=False)
+        else:
+            content = json.dumps(content, indent=2)
+
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content)
