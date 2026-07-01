@@ -1,7 +1,0 @@
-{
-  "dependencies": ["."],
-  "graphs": {
-    "arena_agent": "./ai_agent/ai_chatbot/ai_chatbot.py:make_graph"
-  },
-  "env": "./ai_agent/.env"
-}
