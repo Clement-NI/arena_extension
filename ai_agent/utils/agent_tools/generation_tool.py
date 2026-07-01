@@ -19,6 +19,26 @@ from tools.topology.emitters import csv as _csv
 from tools.topology.schema import load_topology
 
 
+# Canonical output directory = <project>/ai_agent/out/, computed from THIS file's
+# location so it never depends on the current working directory or on whatever
+# path prefix the model guesses.
+#   generation_tool.py -> agent_tools -> utils -> ai_agent
+_AI_AGENT_DIR = Path(__file__).resolve().parent.parent.parent
+OUT_DIR = _AI_AGENT_DIR / "out"
+
+
+def _resolve_out(path: str) -> Path:
+    """Anchor any model-supplied path to <project>/ai_agent/out/<filename>.
+
+    Weak/local models often prepend stray prefixes like
+    'arena_extension/ai_agent/out/', which would create nested folders relative
+    to the current directory. We keep only the file name and pin it to the
+    canonical out dir, so files always land in the same place and the
+    validate/compile tools can find them again.
+    """
+    return OUT_DIR / Path(path).name
+
+
 @tool
 def write_config_file(path: str, content: Union[str, dict, list]) -> str:
     """Write generated Arena configuration to disk.
@@ -39,13 +59,13 @@ def write_config_file(path: str, content: Union[str, dict, list]) -> str:
     # Many models (especially local/Ollama ones) pass structured content as a
     # dict/list instead of a serialized string. Normalize it so the tool call
     # doesn't fail schema validation and the file still gets written.
+    p = _resolve_out(path)
     if not isinstance(content, str):
-        if str(path).lower().endswith((".yaml", ".yml")):
+        if p.suffix.lower() in (".yaml", ".yml"):
             content = yaml.safe_dump(content, sort_keys=False)
         else:
             content = json.dumps(content, indent=2)
 
-    p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content)
     return f"wrote {p} ({len(content)} bytes)"
@@ -68,7 +88,7 @@ def compile_topology(topology_yaml_path: str, nodes_json_path: str, fmt: str = "
         The compiled output, or an error string starting with "ERROR:".
     """
     try:
-        topo = load_topology(Path(topology_yaml_path), Path(nodes_json_path))
+        topo = load_topology(_resolve_out(topology_yaml_path), _resolve_out(nodes_json_path))
         links = _compile(topo)
     except Exception as e:  # surfaced back to the model so it can self-correct
         return f"ERROR: {e}"
