@@ -6,12 +6,11 @@ of the prompt, this tool will tell us and correct it.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from langchain_core.tools import tool
 
 from tools.topology.schema import load_topology
-# Resolve paths to the same canonical ai_agent/out/ dir the writer uses,
-# so validation finds the files the model just wrote regardless of prefix.
-from ai_agent.utils.agent_tools.generation_tool import _resolve_out
 
 
 @tool
@@ -36,7 +35,7 @@ def validate_topology(topology_yaml_path: str, nodes_json_path: str) -> str:
         "INVALID: <path-style error>" describing what to fix.
     """
     try:
-        topo = load_topology(_resolve_out(topology_yaml_path), _resolve_out(nodes_json_path))
+        topo = load_topology(Path(topology_yaml_path), Path(nodes_json_path))
     except Exception as e:
         return f"INVALID: {e}"
 
