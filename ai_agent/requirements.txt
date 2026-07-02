@@ -1,22 +1,26 @@
-# Arena AI agent dependencies.
+# Arena AI agent dependencies — pinned to the latest releases as of 2026-07.
 # Install with:  pip install -r ai_agent/requirements.txt
 
 # Agent framework (LangChain v1 `create_agent` + middleware + LangGraph runtime)
-langchain>=1.0.0
-langgraph>=1.0.0
+langchain==1.3.11
+langgraph==1.2.7
+
+# Dev server for Studio:  cd ai_agent && langgraph dev
+langgraph-cli[inmem]==0.4.30
 
 # Model providers — keep the one(s) you actually use.
 # init_chat_model() picks the backend from the model string, e.g.
-#   "anthropic:claude-opus-4-8"  or  "openai:gpt-4.1"
-langchain-anthropic>=0.3.0
-langchain-openai>=0.2.0
+#   "anthropic:claude-opus-4-8", "openai:gpt-4.1", "google_genai:gemini-2.5-flash",
+#   "ollama:llama3.1:8b"
+langchain-anthropic==1.4.8
+langchain-openai==1.3.3
 # For DEFAULT_MODEL = "google_genai:..." you need the LangChain wrapper,
 # NOT the raw google-genai SDK.
-langchain-google-genai>=2.0.0
-langchain-ollama
+langchain-google-genai==4.2.6
+langchain-ollama==1.1.0
 
 # Config generation / validation (reuses tools/topology, which needs PyYAML)
-pyyaml>=6.0
+pyyaml==6.0.3
 
 # Loads ai_agent/.env into the environment
-python-dotenv>=1.0.0
+python-dotenv==1.2.2
