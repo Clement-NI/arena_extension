@@ -51,7 +51,7 @@ nodes.json shape (no top-level "nodes": list; nodes are nested under hosts):
 {
   "cluster_name": "arena-testbed",
   "hosts": [
-    {"context": "default", "addr": "<ip>", "ssh": "",
+    {"context": "default", "addr": "<ip>",
      "nodes": [
        {"name": "Controller", "tier": "Controller", "role": "control-plane", "cpu": "4", "memory": "8Gi"},
        {"name": "Cloud-1", "tier": "Cloud", "role": "worker", "cpu": "8", "memory": "16Gi"}
@@ -59,6 +59,7 @@ nodes.json shape (no top-level "nodes": list; nodes are nested under hosts):
   ]
 }
 Exactly one node must be role "control-plane", and it lives on hosts[0].
+Remember : For multi-host mode, the context of the main host must be "default"
 
 topology.yaml shape:
   version: "1"
