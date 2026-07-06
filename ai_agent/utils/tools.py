@@ -3,12 +3,17 @@ Here is the entrance of all of the tools for our ai agent.
 We have now : correction_tool and generation_tool
 '''
 
-from ai_agent.utils.agent_tools.generation_tool import write_config_file, compile_topology
+from ai_agent.utils.agent_tools.generation_tool import (
+    compile_topology,
+    generate_config_files,
+    write_config_file,
+)
 from ai_agent.utils.agent_tools.correction_tool import validate_topology
 
 # The full tool belt handed to create_agent(). Order is informational only.
 ALL_TOOLS = [
-    write_config_file,   # generation: write nodes.json / topology.yaml to disk
-    compile_topology,    # generation: nodes.json + topology.yaml -> NetworkChaos / matrix
-    validate_topology,   # correction: validate and surface fixable errors
+    generate_config_files,  # generation: ScenarioSpec -> nodes.json + topology.yaml
+    write_config_file,      # generation: write arbitrary config content to disk
+    compile_topology,       # generation: nodes.json + topology.yaml -> NetworkChaos / matrix
+    validate_topology,      # correction: validate and surface fixable errors
 ]

@@ -28,11 +28,11 @@ holds the node functions and their routers:
                 '-- "done"     -> END
 
 Design rule: the LLM is used ONCE, in read_scenario, to extract a structured
-ScenarioSpec. Every artifact (nodes.json, topology.yaml, chaos.yaml) is composed
-by plain Python from that spec — the model never writes config text, so it
-cannot hallucinate fields. All artifact I/O goes through the SAME registered
-agent tools the chatbot uses (write_config_file / validate_topology /
-compile_topology), invoked directly by the nodes with .invoke().
+ScenarioSpec — the model never writes config text, so it cannot hallucinate
+fields. Everything after that goes through the SAME registered agent tools the
+chatbot uses, invoked directly by the nodes with .invoke():
+generate_config_files (spec -> nodes.json + topology.yaml), validate_topology,
+compile_topology (+ write_config_file for chaos.yaml).
 
 The two LLM-using nodes (read_scenario, ask_next) take an optional `model`
 parameter; workflow.py binds it with functools.partial so tests can inject a
@@ -63,11 +63,15 @@ from ai_agent.configurations.setting import (
 )
 from ai_agent.utils.states import ArenaWorkflowState, NextAction, ScenarioSpec
 
-# The registered agent tools are the single I/O layer for config artifacts:
-# the chatbot's LLM calls them via function-calling, the workflow nodes call
-# the same tools directly with .invoke().
+# The registered agent tools are the single generation/I-O layer for config
+# artifacts: the chatbot's LLM calls them via function-calling, the workflow
+# nodes call the same tools directly with .invoke().
 from ai_agent.utils.agent_tools.correction_tool import validate_topology
-from ai_agent.utils.agent_tools.generation_tool import compile_topology, write_config_file
+from ai_agent.utils.agent_tools.generation_tool import (
+    compile_topology,
+    generate_config_files,
+    write_config_file,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -103,60 +107,6 @@ def _get_llm(model=None):
         max_retries=max_retries,
     )
 
-
-# ---------------------------------------------------------------------------
-# Deterministic composition: ScenarioSpec -> config files
-# ---------------------------------------------------------------------------
-
-def _compose_nodes_json(spec: ScenarioSpec) -> dict:
-    return {
-        "cluster_name": spec.cluster_name,
-        "hosts": [
-            {
-                "context": "default",
-                "addr": "127.0.0.1",
-                "ssh": "",
-                "nodes": [
-                    {"name": n.name, "tier": n.tier, "role": n.role,
-                     "cpu": n.cpu, "memory": n.memory}
-                    for n in spec.nodes
-                ],
-            }
-        ],
-    }
-
-
-def _compose_topology_yaml(spec: ScenarioSpec) -> dict:
-    # regions = lowercased tiers, members = worker nodes of that tier
-    regions: dict = {}
-    for n in spec.nodes:
-        if n.role != "worker":
-            continue
-        regions.setdefault(n.tier.lower(), {"members": []})["members"].append(n.name)
-
-    region_pairs = []
-    for r in spec.rules:
-        pair = {"from": r.from_region.lower(), "to": r.to_region.lower()}
-        for key, val in (("latency", r.latency), ("bw", r.bw),
-                         ("loss", r.loss), ("jitter", r.jitter)):
-            if val:
-                pair[key] = val
-        if len(pair) > 2:            # at least one metric set
-            region_pairs.append(pair)
-
-    return {
-        "version": "1",
-        "symmetric": True,
-        "regions": regions,
-        "defaults": {
-            "intra-region": {"latency": spec.default_intra_latency,
-                             "bw": spec.default_intra_bw},
-            "inter-region": {"latency": spec.default_inter_latency,
-                             "bw": spec.default_inter_bw},
-        },
-        "region_pairs": region_pairs,
-        "exceptions": [],
-    }
 
 
 def _tail(text: str, n: int = 1500) -> str:
@@ -195,15 +145,12 @@ def after_read(state: ArenaWorkflowState) -> str:
 # ---------------------------------------------------------------------------
 
 def generate_configs(state: ArenaWorkflowState) -> dict:
-    spec = ScenarioSpec(**state["scenario"])
     nodes_path = OUT_DIR / "nodes.json"
     topo_path = OUT_DIR / "topology.yaml"
-    # the registered tool serializes dicts (JSON for .json, YAML for .yaml)
-    # and creates parent directories
-    write_config_file.invoke({"path": str(nodes_path),
-                              "content": _compose_nodes_json(spec)})
-    write_config_file.invoke({"path": str(topo_path),
-                              "content": _compose_topology_yaml(spec)})
+    # the registered generation tool owns the whole spec -> files step
+    generate_config_files.invoke({"scenario": state["scenario"],
+                                  "nodes_json_path": str(nodes_path),
+                                  "topology_yaml_path": str(topo_path)})
     return {"nodes_json_path": str(nodes_path), "topology_yaml_path": str(topo_path)}
 
 

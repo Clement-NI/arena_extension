@@ -13,10 +13,107 @@ from typing import Union
 import yaml
 from langchain_core.tools import tool
 
+from ai_agent.utils.states import ScenarioSpec
 from tools.topology.compiler import compile as _compile
 from tools.topology.emitters import chaosmesh as _chaosmesh
 from tools.topology.emitters import csv as _csv
 from tools.topology.schema import load_topology
+
+
+# ---------------------------------------------------------------------------
+# ScenarioSpec -> config content (the actual "generation" this tool is named
+# after). Used by generate_config_files below and, through it, by both the
+# chatbot and the workflow.
+# ---------------------------------------------------------------------------
+
+def _compose_nodes_json(spec: ScenarioSpec) -> dict:
+    return {
+        "cluster_name": spec.cluster_name,
+        "hosts": [
+            {
+                "context": "default",
+                "addr": "127.0.0.1",
+                "ssh": "",
+                "nodes": [
+                    {"name": n.name, "tier": n.tier, "role": n.role,
+                     "cpu": n.cpu, "memory": n.memory}
+                    for n in spec.nodes
+                ],
+            }
+        ],
+    }
+
+
+def _compose_topology_yaml(spec: ScenarioSpec) -> dict:
+    # regions = lowercased tiers, members = worker nodes of that tier
+    regions: dict = {}
+    for n in spec.nodes:
+        if n.role != "worker":
+            continue
+        regions.setdefault(n.tier.lower(), {"members": []})["members"].append(n.name)
+
+    region_pairs = []
+    for r in spec.rules:
+        pair = {"from": r.from_region.lower(), "to": r.to_region.lower()}
+        for key, val in (("latency", r.latency), ("bw", r.bw),
+                         ("loss", r.loss), ("jitter", r.jitter)):
+            if val:
+                pair[key] = val
+        if len(pair) > 2:            # at least one metric set
+            region_pairs.append(pair)
+
+    return {
+        "version": "1",
+        "symmetric": True,
+        "regions": regions,
+        "defaults": {
+            "intra-region": {"latency": spec.default_intra_latency,
+                             "bw": spec.default_intra_bw},
+            "inter-region": {"latency": spec.default_inter_latency,
+                             "bw": spec.default_inter_bw},
+        },
+        "region_pairs": region_pairs,
+        "exceptions": [],
+    }
+
+
+def _write(path: str, content: Union[str, dict, list]) -> str:
+    """Serialize (JSON for .json, YAML for .yaml/.yml) and write to disk."""
+    if not isinstance(content, str):
+        if str(path).lower().endswith((".yaml", ".yml")):
+            content = yaml.safe_dump(content, sort_keys=False)
+        else:
+            content = json.dumps(content, indent=2)
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(content)
+    return f"wrote {p} ({len(content)} bytes)"
+
+
+@tool
+def generate_config_files(scenario: ScenarioSpec,
+                          nodes_json_path: str = "ai_agent/out/nodes.json",
+                          topology_yaml_path: str = "ai_agent/out/topology.yaml") -> str:
+    """Generate nodes.json and topology.yaml from a structured ScenarioSpec.
+
+    This is the generation step itself: it composes both Arena input files from
+    the spec (cluster nodes, regions derived from tiers, default and per-pair
+    network rules) and writes them to disk. Prefer this over hand-writing the
+    file contents — the composition is deterministic and cannot hallucinate
+    fields.
+
+    Args:
+        scenario: the structured scenario (nodes, rules, defaults, flags).
+        nodes_json_path: where to write nodes.json.
+        topology_yaml_path: where to write topology.yaml.
+
+    Returns:
+        A confirmation string listing both written files.
+    """
+    spec = scenario if isinstance(scenario, ScenarioSpec) else ScenarioSpec(**scenario)
+    r1 = _write(nodes_json_path, _compose_nodes_json(spec))
+    r2 = _write(topology_yaml_path, _compose_topology_yaml(spec))
+    return f"{r1}; {r2}"
 
 
 @tool
@@ -37,18 +134,8 @@ def write_config_file(path: str, content: Union[str, dict, list]) -> str:
         A confirmation string with the path and byte count.
     """
     # Many models (especially local/Ollama ones) pass structured content as a
-    # dict/list instead of a serialized string. Normalize it so the tool call
-    # doesn't fail schema validation and the file still gets written.
-    if not isinstance(content, str):
-        if str(path).lower().endswith((".yaml", ".yml")):
-            content = yaml.safe_dump(content, sort_keys=False)
-        else:
-            content = json.dumps(content, indent=2)
-
-    p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(content)
-    return f"wrote {p} ({len(content)} bytes)"
+    # dict/list instead of a serialized string; _write normalizes that.
+    return _write(path, content)
 
 
 @tool
