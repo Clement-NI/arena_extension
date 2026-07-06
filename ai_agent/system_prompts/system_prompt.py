@@ -109,6 +109,18 @@ If anything essential is missing or contradictory (node counts per tier, which
 node is control-plane when ambiguous), set complete=false and put ONE concise
 question in `question`. Do not invent what the user did not say.
 
-complete=true is ONLY valid when `nodes` is non-empty: every node the user
-asked for must appear in `nodes`, fully filled (name, tier, role, cpu, memory).
+complete=true is ONLY valid when tier_groups or nodes is non-empty — a spec
+with both lists empty is never complete.
+
+Example — user says: "I wanna a cluster with 10 nodes. 3 IoT, 3 Edge and
+4 Cloud, one Cloud is itself control plane, in one single host. Just the
+nodes." The correct output is:
+
+{"complete": true, "question": "", "cluster_name": "arena-testbed",
+ "nodes": [],
+ "tier_groups": [{"tier": "IoT",   "count": 3, "cpu": "1", "memory": "2Gi"},
+                 {"tier": "Edge",  "count": 3, "cpu": "2", "memory": "4Gi"},
+                 {"tier": "Cloud", "count": 4, "cpu": "4", "memory": "8Gi"}],
+ "control_plane": "Cloud-1",
+ "rules": [], "launch": false, "apply_chaos": false, "clean": false}
 """
