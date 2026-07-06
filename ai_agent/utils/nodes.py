@@ -29,8 +29,10 @@ holds the node functions and their routers:
 
 Design rule: the LLM is used ONCE, in read_scenario, to extract a structured
 ScenarioSpec. Every artifact (nodes.json, topology.yaml, chaos.yaml) is composed
-by plain Python from that spec and checked by Arena's own loader — the model
-never writes config text, so it cannot hallucinate fields.
+by plain Python from that spec — the model never writes config text, so it
+cannot hallucinate fields. All artifact I/O goes through the SAME registered
+agent tools the chatbot uses (write_config_file / validate_topology /
+compile_topology), invoked directly by the nodes with .invoke().
 
 The two LLM-using nodes (read_scenario, ask_next) take an optional `model`
 parameter; workflow.py binds it with functools.partial so tests can inject a
@@ -44,7 +46,6 @@ import shutil
 import subprocess
 from pathlib import Path
 
-import yaml
 from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
 from ai_agent.system_prompts.system_prompt import EXTRACT_PROMPT
@@ -62,9 +63,11 @@ from ai_agent.configurations.setting import (
 )
 from ai_agent.utils.states import ArenaWorkflowState, NextAction, ScenarioSpec
 
-from tools.topology.compiler import compile as compile_links
-from tools.topology.emitters import chaosmesh
-from tools.topology.schema import load_topology
+# The registered agent tools are the single I/O layer for config artifacts:
+# the chatbot's LLM calls them via function-calling, the workflow nodes call
+# the same tools directly with .invoke().
+from ai_agent.utils.agent_tools.correction_tool import validate_topology
+from ai_agent.utils.agent_tools.generation_tool import compile_topology, write_config_file
 
 
 # ---------------------------------------------------------------------------
@@ -193,11 +196,14 @@ def after_read(state: ArenaWorkflowState) -> str:
 
 def generate_configs(state: ArenaWorkflowState) -> dict:
     spec = ScenarioSpec(**state["scenario"])
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
     nodes_path = OUT_DIR / "nodes.json"
     topo_path = OUT_DIR / "topology.yaml"
-    nodes_path.write_text(json.dumps(_compose_nodes_json(spec), indent=2))
-    topo_path.write_text(yaml.safe_dump(_compose_topology_yaml(spec), sort_keys=False))
+    # the registered tool serializes dicts (JSON for .json, YAML for .yaml)
+    # and creates parent directories
+    write_config_file.invoke({"path": str(nodes_path),
+                              "content": _compose_nodes_json(spec)})
+    write_config_file.invoke({"path": str(topo_path),
+                              "content": _compose_topology_yaml(spec)})
     return {"nodes_json_path": str(nodes_path), "topology_yaml_path": str(topo_path)}
 
 
@@ -206,16 +212,22 @@ def generate_configs(state: ArenaWorkflowState) -> dict:
 # ---------------------------------------------------------------------------
 
 def validate_configs(state: ArenaWorkflowState) -> dict:
-    try:
-        topo = load_topology(Path(state["topology_yaml_path"]),
-                             Path(state["nodes_json_path"]))
-        cps = [n for n in topo.nodes.values() if n.role == "control-plane"]
-        if len(cps) != 1:
-            raise ValueError(f"exactly one control-plane required, found {len(cps)}")
-        return {"validation_error": None}
-    except Exception as e:
-        return {"validation_error": str(e),
+    verdict = validate_topology.invoke({
+        "topology_yaml_path": state["topology_yaml_path"],
+        "nodes_json_path": state["nodes_json_path"],
+    })
+    if not verdict.startswith("OK"):
+        return {"validation_error": verdict,
                 "generation_retries": state.get("generation_retries", 0) + 1}
+
+    # extra guard the tool doesn't cover: exactly one control-plane node
+    data = json.loads(Path(state["nodes_json_path"]).read_text())
+    cps = [n for h in data.get("hosts", []) for n in h.get("nodes", [])
+           if n.get("role") == "control-plane"]
+    if len(cps) != 1:
+        return {"validation_error": f"exactly one control-plane required, found {len(cps)}",
+                "generation_retries": state.get("generation_retries", 0) + 1}
+    return {"validation_error": None}
 
 
 def after_validate(state: ArenaWorkflowState) -> str:
@@ -260,10 +272,16 @@ def launch_arena(state: ArenaWorkflowState) -> dict:
 
 def generate_chaos(state: ArenaWorkflowState) -> dict:
     spec = ScenarioSpec(**state["scenario"])
-    topo = load_topology(Path(state["topology_yaml_path"]),
-                         Path(state["nodes_json_path"]))
+    chaos_text = compile_topology.invoke({
+        "topology_yaml_path": state["topology_yaml_path"],
+        "nodes_json_path": state["nodes_json_path"],
+        "fmt": "chaosmesh",
+    })
+    if chaos_text.startswith("ERROR:"):
+        return {"chaos_yaml_path": None, "chaos_apply_ok": False,
+                "chaos_log": chaos_text}
     chaos_path = OUT_DIR / "chaos.yaml"
-    chaos_path.write_text(chaosmesh.dump(compile_links(topo)))
+    write_config_file.invoke({"path": str(chaos_path), "content": chaos_text})
 
     result = {"chaos_yaml_path": str(chaos_path)}
     if spec.apply_chaos and state.get("launch_ok"):
