@@ -45,7 +45,6 @@ stub model.
 from __future__ import annotations
 
 import json
-import re
 import subprocess
 from pathlib import Path
 
@@ -65,7 +64,7 @@ from ai_agent.configurations.setting import (
     streaming,
     temperature,
 )
-from ai_agent.utils.states import ArenaWorkflowState, NextAction, ScenarioSpec, TierGroup
+from ai_agent.utils.states import ArenaWorkflowState, NextAction, ScenarioSpec
 
 # The registered agent tools are the single generation/I-O layer for config
 # artifacts: the chatbot's LLM calls them via function-calling, the workflow
@@ -120,49 +119,6 @@ def _tail(text: str, n: int = 1500) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Deterministic rescue parser: when the LLM cannot fill the spec but the user
-# already wrote the counts plainly ("34 IoT, 33 Edge, 33 Cloud", "34/33/33",
-# "edge x33"), build the ScenarioSpec with a regex instead of looping on the
-# same clarifying question.
-# ---------------------------------------------------------------------------
-
-_TIER_ALIASES = {"iot": "IoT", "edge": "Edge", "cloud": "Cloud"}
-_TIER_DEFAULTS = {"IoT": ("1", "2Gi"), "Edge": ("2", "4Gi"), "Cloud": ("4", "8Gi")}
-
-
-def _fallback_parse(messages) -> ScenarioSpec | None:
-    text = " \n ".join(str(m.content) for m in messages
-                       if getattr(m, "type", "") == "human").lower()
-
-    counts: dict = {}
-    # "34 iot(s)", "33 edges", "33 cloud"
-    for num, tier in re.findall(r"(\d+)\s*(iot|edge|cloud)", text):
-        counts[_TIER_ALIASES[tier]] = int(num)
-    # "iot x34", "edge: 33"
-    for tier, num in re.findall(r"(iot|edge|cloud)s?\s*[x:×]\s*(\d+)", text):
-        counts[_TIER_ALIASES[tier]] = int(num)
-    # bare "34/33/33" -> IoT/Edge/Cloud in that order (last one wins)
-    if not counts:
-        triples = re.findall(r"(\d+)\s*/\s*(\d+)\s*/\s*(\d+)", text)
-        if triples:
-            a, b, c = triples[-1]
-            counts = {"IoT": int(a), "Edge": int(b), "Cloud": int(c)}
-    if not counts:
-        return None
-
-    m = (re.search(r"(iot|edge|cloud)[^.\n]{0,50}control[\s-]?plane", text)
-         or re.search(r"control[\s-]?plane[^.\n]{0,50}(iot|edge|cloud)", text))
-    cp_tier = _TIER_ALIASES[m.group(1)] if m else (
-        "Cloud" if "Cloud" in counts else next(iter(counts)))
-
-    groups = [TierGroup(tier=t, count=n,
-                        cpu=_TIER_DEFAULTS[t][0], memory=_TIER_DEFAULTS[t][1])
-              for t, n in counts.items()]
-    return ScenarioSpec(complete=True, tier_groups=groups,
-                        control_plane=f"{cp_tier}-1")
-
-
-# ---------------------------------------------------------------------------
 # 1. read the scenario, make sure of the information
 # ---------------------------------------------------------------------------
 
@@ -182,24 +138,15 @@ def read_scenario(state: ArenaWorkflowState, model=None) -> dict:
     except Exception as e:
         # Weak models sometimes emit unparseable output (YAML fences, comments,
         # "..." ellipses) instead of the structured object — don't crash the
-        # graph: try the deterministic rescue parser, else ask the user.
-        spec = _fallback_parse(state["messages"])
-        if spec is None:
-            msg = (
-                "I couldn't parse the scenario from the model's answer "
-                f"({type(e).__name__}: {str(e)[:150]}...).\n"
-                "Please restate it compactly, e.g.: "
-                "'IoT x34, Edge x33, Cloud x33, Cloud-1 is the control plane, "
-                "30ms/100Mbit between edge and cloud'."
-            )
-            return {"info_complete": False, "messages": [AIMessage(content=msg)]}
-    # LLM produced no usable nodes although the user already wrote the counts
-    # plainly? Rescue with the regex parser instead of re-asking the same
-    # question forever.
-    if not spec.complete and not spec.nodes and not spec.tier_groups:
-        rescued = _fallback_parse(state["messages"])
-        if rescued is not None:
-            spec = rescued
+        # graph, ask the user to restate compactly (tier counts parse best).
+        msg = (
+            "I couldn't parse the scenario from the model's answer "
+            f"({type(e).__name__}: {str(e)[:150]}...).\n"
+            "Please restate it compactly, e.g.: "
+            "'IoT x34, Edge x33, Cloud x33, Cloud-1 is the control plane, "
+            "30ms/100Mbit between edge and cloud'."
+        )
+        return {"info_complete": False, "messages": [AIMessage(content=msg)]}
     if not spec.complete:
         q = spec.question or "Could you give more details about the nodes per tier?"
         return {"info_complete": False, "scenario": spec.model_dump(),
