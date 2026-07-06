@@ -49,12 +49,12 @@ def build_workflow(model=None, checkpointer=None):
     g.add_node("generate_configs", generate_configs)
     g.add_node("validate_configs", validate_configs)
     g.add_node("publish_configs", publish_configs)
-    # g.add_node("launch_arena", launch_arena)
-    # g.add_node("generate_chaos", generate_chaos)
+    g.add_node("launch_arena", launch_arena)
+    g.add_node("generate_chaos", generate_chaos)
     g.add_node("summarize", summarize)
-    # g.add_node("ask_next", partial(ask_next, model=model))
-    # g.add_node("clean_cluster", clean_cluster)
-    # g.add_node("report_final", report_final)
+    g.add_node("ask_next", partial(ask_next, model=model))
+    g.add_node("clean_cluster", clean_cluster)
+    g.add_node("report_final", report_final)
 
     g.add_edge(START, "read_scenario")
     g.add_conditional_edges("read_scenario", after_read,
@@ -64,18 +64,18 @@ def build_workflow(model=None, checkpointer=None):
                             {"publish_configs": "publish_configs",
                              "read_scenario": "read_scenario",
                              "summarize": "summarize"})
-    # g.add_edge("publish_configs", "launch_arena")
-    # g.add_edge("launch_arena", "generate_chaos")
-    # g.add_edge("generate_chaos", "summarize")
-    # # summarize FIRST, then ask the user whether to clean / do something else
-    # g.add_conditional_edges("summarize", after_summarize,
-    #                         {"clean_cluster": "clean_cluster",
-    #                          "ask_next": "ask_next", END: END})
-    # g.add_conditional_edges("ask_next", after_ask,
-    #                         {"clean_cluster": "clean_cluster",
-    #                          "read_scenario": "read_scenario", END: END})
-    # g.add_edge("clean_cluster", "report_final")
-    # g.add_edge("report_final", END)
+    g.add_edge("publish_configs", "launch_arena")
+    g.add_edge("launch_arena", "generate_chaos")
+    g.add_edge("generate_chaos", "summarize")
+    # summarize FIRST, then ask the user whether to clean / do something else
+    g.add_conditional_edges("summarize", after_summarize,
+                            {"clean_cluster": "clean_cluster",
+                             "ask_next": "ask_next", END: END})
+    g.add_conditional_edges("ask_next", after_ask,
+                            {"clean_cluster": "clean_cluster",
+                             "read_scenario": "read_scenario", END: END})
+    g.add_edge("clean_cluster", "report_final")
+    g.add_edge("report_final", END)
 
     return g.compile(checkpointer=checkpointer)
 
