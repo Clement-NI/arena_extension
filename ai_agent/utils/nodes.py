@@ -36,7 +36,7 @@ from typing import Optional
 import yaml
 from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
-from ai_agent.system_prompts import system_prompt
+from ai_agent.system_prompts.system_prompt import EXTRACT_PROMPT
 from langchain_core.messages import AIMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
 
@@ -67,9 +67,12 @@ TESTBED_DIR = _PROJECT_ROOT / "arena_testbed"
 load_dotenv(_PROJECT_ROOT / "ai_agent" / ".env")
 
 MAX_GENERATION_RETRIES = max_retries
-LAUNCH_SCRIPTS = ["0-set_environments.sh", "1-launch_cluster.sh", "2-set_frameworks.sh","3b-clean-multihost.sh"]
+# Launch = scripts 0/1/2 only. Cleaning is a SEPARATE node (clean_cluster):
+# putting 3-clean here would tear the cluster down right after launching it.
+LAUNCH_SCRIPTS = ["0-set_environments.sh", "1-launch_cluster.sh", "2-set_frameworks.sh"]
+CLEAN_SCRIPT = "3-clean_cluster.sh"
 
-_EXTRACT_PROMPT = system_prompt
+_EXTRACT_PROMPT = EXTRACT_PROMPT
 
 def _get_llm(model=None):
     """Build the extraction LLM lazily so importing this module needs no API key."""
@@ -252,9 +255,22 @@ def build_workflow(model=None, checkpointer=None):
             result["chaos_log"] = "skipped (not requested or cluster not launched)"
         return result
 
-    def clean_cluster(state:ArenaWorkflowState)  -> dict:
-
-        return None
+    # -- 5. clean / tear down the cluster (script 3, only when asked) ---------
+    def clean_cluster(state: ArenaWorkflowState) -> dict:
+        spec = ScenarioSpec(**state["scenario"])
+        if not spec.clean:
+            return {"clean_ok": None,
+                    "clean_log": "skipped (user did not ask to clean)"}
+        try:
+            r = subprocess.run(
+                ["bash", CLEAN_SCRIPT], cwd=TESTBED_DIR,
+                capture_output=True, text=True, timeout=900,
+            )
+            return {"clean_ok": r.returncode == 0,
+                    "clean_log": f"$ {CLEAN_SCRIPT} (exit {r.returncode})\n"
+                                 f"{_tail(r.stdout + r.stderr)}"}
+        except Exception as e:                       # bash missing, timeout…
+            return {"clean_ok": False, "clean_log": f"$ {CLEAN_SCRIPT} FAILED: {e}"}
 
     # -- 5. summarize ---------------------------------------------------------
     def summarize(state: ArenaWorkflowState) -> dict:
@@ -280,6 +296,12 @@ def build_workflow(model=None, checkpointer=None):
             lines.append(f"- kubectl apply : FAILED\n{_tail(state.get('chaos_log', ''), 400)}")
         else:
             lines.append("- kubectl apply : skipped")
+        if state.get("clean_ok") is True:
+            lines.append("- cluster clean : OK")
+        elif state.get("clean_ok") is False:
+            lines.append(f"- cluster clean : FAILED\n{_tail(state.get('clean_log', ''), 400)}")
+        else:
+            lines.append("- cluster clean : skipped")
         return {"messages": [AIMessage(content="\n".join(lines))]}
 
     # -- graph wiring ---------------------------------------------------------
@@ -289,6 +311,7 @@ def build_workflow(model=None, checkpointer=None):
     g.add_node("validate_configs", validate_configs)
     g.add_node("launch_arena", launch_arena)
     g.add_node("generate_chaos", generate_chaos)
+    g.add_node("clean_cluster", clean_cluster)
     g.add_node("summarize", summarize)
 
     g.add_edge(START, "read_scenario")
@@ -300,7 +323,8 @@ def build_workflow(model=None, checkpointer=None):
                              "read_scenario": "read_scenario",
                              "summarize": "summarize"})
     g.add_edge("launch_arena", "generate_chaos")
-    g.add_edge("generate_chaos", "summarize")
+    g.add_edge("generate_chaos", "clean_cluster")
+    g.add_edge("clean_cluster", "summarize")
     g.add_edge("summarize", END)
 
     return g.compile(checkpointer=checkpointer)

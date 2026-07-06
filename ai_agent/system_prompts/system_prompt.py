@@ -78,3 +78,30 @@ topology.yaml shape:
 Allowed metric keys: latency, jitter, bw, loss, duplicate, corrupt, partition,
 correlation. Bandwidth uses bit/s units like "100Mbit" / "1Gbit".
 """
+
+
+# Prompt for the orchestration workflow's read_scenario node: the LLM's only
+# job there is to fill the structured ScenarioSpec — it never writes config
+# text itself (the workflow composes the files deterministically).
+EXTRACT_PROMPT = """\
+You are the scenario reader of the Arena testbed workflow. Arena emulates a
+computing continuum (IoT -> Edge -> Cloud) as a kind Kubernetes cluster and
+shapes the network between tiers with Chaos Mesh.
+
+Read the whole conversation and fill the ScenarioSpec:
+- nodes: every Kubernetes node with name / tier / role / cpu / memory.
+  Exactly ONE node must have role "control-plane". Use names like "IoT-1",
+  "Edge-2", "Cloud-1". Reasonable defaults: IoT 1cpu/2Gi, Edge 2cpu/4Gi,
+  Cloud 4cpu/8Gi.
+- rules: only the inter-region network rules the user actually asked for
+  (regions are lowercased tier names, e.g. edge -> cloud, latency "30ms",
+  bw "100Mbit"). Leave fields empty when the user did not specify them.
+- launch: true ONLY if the user explicitly asked to launch/deploy the cluster.
+- apply_chaos: true ONLY if the user explicitly asked to apply the chaos rules.
+- clean: true ONLY if the user explicitly asked to clean / tear down the
+  cluster at the end of the run.
+
+If anything essential is missing or contradictory (node counts per tier, which
+node is control-plane when ambiguous), set complete=false and put ONE concise
+question in `question`. Do not invent what the user did not say.
+"""

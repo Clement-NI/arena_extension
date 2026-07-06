@@ -1,14 +1,3 @@
-from typing import NotRequired
-from typing_extensions import TypedDict
-from langgraph.graph import StateGraph
-
-
-class State(TypedDict):
-    messages: list
-    summary: NotRequired[str]
-
-
-builder = StateGraph(State)
 '''
 State schema for the Arena orchestration workflow.
 
@@ -22,15 +11,31 @@ One state object is carried through the whole flow:
     4. launch_arena      runs arena_testbed/0,1,2 scripts (only when requested).
     5. generate_chaos    compiles chaos.yaml with tools/topology and optionally
                          applies it with kubectl.
-    6. summarize         final report appended to messages.
+    6. clean_cluster     tears the cluster down with 3-clean_cluster.sh
+                         (only when the user explicitly asked to clean).
+    7. summarize         final report appended to messages.
 '''
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List, NotRequired, Optional
 
-from langgraph.graph import MessagesState
+from langgraph.graph import MessagesState, StateGraph
 from pydantic import BaseModel, Field
+from typing_extensions import TypedDict
+
+
+# ---------------------------------------------------------------------------
+# Minimal scratch state (kept for experiments in Studio; the real workflow
+# below uses ArenaWorkflowState).
+# ---------------------------------------------------------------------------
+
+class State(TypedDict):
+    messages: list
+    summary: NotRequired[str]
+
+
+builder = StateGraph(State)
 
 
 # ---------------------------------------------------------------------------
@@ -73,6 +78,7 @@ class ScenarioSpec(BaseModel):
     default_inter_bw: str = Field(default="100Mbit")
     launch: bool = Field(default=False, description="True only if the user explicitly asked to launch/deploy the cluster")
     apply_chaos: bool = Field(default=False, description="True only if the user explicitly asked to apply the chaos with kubectl")
+    clean: bool = Field(default=False, description="True only if the user explicitly asked to clean/tear down the cluster at the end")
 
 
 # ---------------------------------------------------------------------------
@@ -80,7 +86,7 @@ class ScenarioSpec(BaseModel):
 # ---------------------------------------------------------------------------
 
 class ArenaWorkflowState(MessagesState):
-    """Carried across scenario -> configs -> launch -> chaos."""
+    """Carried across scenario -> configs -> launch -> chaos -> clean."""
 
     # step 1 — scenario understanding
     scenario: Optional[dict]            # ScenarioSpec.model_dump()
@@ -102,3 +108,7 @@ class ArenaWorkflowState(MessagesState):
     chaos_yaml_path: Optional[str]
     chaos_apply_ok: Optional[bool]
     chaos_log: Optional[str]
+
+    # step 5 — cluster teardown (script 3)
+    clean_ok: Optional[bool]
+    clean_log: Optional[str]
