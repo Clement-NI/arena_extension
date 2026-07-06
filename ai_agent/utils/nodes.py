@@ -13,6 +13,9 @@ holds the node functions and their routers:
             validate_configs --(error, retry)--> read_scenario
                 |
                 v (ok)
+            publish_configs   (validated nodes.json -> arena_testbed/, via tool)
+                |
+                v
             launch_arena      (arena_testbed/0,1,2 — only if user asked to launch)
                 |
                 v
@@ -42,7 +45,6 @@ stub model.
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -178,12 +180,30 @@ def validate_configs(state: ArenaWorkflowState) -> dict:
 
 
 def after_validate(state: ArenaWorkflowState) -> str:
+    # Routers must stay side-effect free (they are re-runnable and their work
+    # is not checkpointed) — the actual write happens in publish_configs.
     if not state.get("validation_error"):
-        # write_config_file.invoke()
-        return "launch_arena"
+        return "publish_configs"
     if state.get("generation_retries", 0) <= MAX_GENERATION_RETRIES:
         return "read_scenario"
     return "summarize"
+
+
+# ---------------------------------------------------------------------------
+# 2c. publish the validated config to the testbed (via the registered tool)
+# ---------------------------------------------------------------------------
+
+def publish_configs(state: ArenaWorkflowState) -> dict:
+    """Copy the validated nodes.json to arena_testbed/nodes.json.
+
+    The launch scripts (1-launch_cluster.sh) read arena_testbed/nodes.json, so
+    the validated config is published there through write_config_file — even
+    when launch is skipped, the user can then run the scripts manually.
+    """
+    content = Path(state["nodes_json_path"]).read_text()
+    result = write_config_file.invoke({"path": str(TESTBED_DIR / "nodes.json"),
+                                       "content": content})
+    return {"publish_log": result}
 
 
 # ---------------------------------------------------------------------------
@@ -196,8 +216,7 @@ def launch_arena(state: ArenaWorkflowState) -> dict:
         return {"launch_ok": None,
                 "launch_log": "skipped (user did not ask to launch)"}
 
-    # the launch scripts read arena_testbed/nodes.json
-    shutil.copy(state["nodes_json_path"], TESTBED_DIR / "nodes.json")
+    # arena_testbed/nodes.json was already published by publish_configs
     logs = []
     for script in LAUNCH_SCRIPTS:
         try:
@@ -263,7 +282,9 @@ def summarize(state: ArenaWorkflowState) -> dict:
     lines = ["Workflow finished.",
              f"- nodes.json    : {state.get('nodes_json_path')}",
              f"- topology.yaml : {state.get('topology_yaml_path')}",
-             f"- chaos.yaml    : {state.get('chaos_yaml_path')}"]
+             f"- chaos.yaml    : {state.get('chaos_yaml_path')}",
+             f"- published to  : arena_testbed/nodes.json"
+             f" ({state.get('publish_log') or 'not published'})"]
     if state.get("launch_ok") is True:
         lines.append("- arena launch  : OK (scripts 0/1/2 completed)")
     elif state.get("launch_ok") is False:

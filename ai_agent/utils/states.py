@@ -108,6 +108,9 @@ class ArenaWorkflowState(MessagesState):
     validation_error: Optional[str]
     generation_retries: int
 
+    # step 2c — publish validated config to arena_testbed/
+    publish_log: Optional[str]
+
     # step 3 — arena launch (scripts 0, 1, 2)
     launch_ok: Optional[bool]
     launch_log: Optional[str]

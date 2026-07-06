@@ -31,6 +31,7 @@ from ai_agent.utils.nodes import (
     generate_chaos,
     generate_configs,
     launch_arena,
+    publish_configs,
     read_scenario,
     report_final,
     summarize,
@@ -47,6 +48,7 @@ def build_workflow(model=None, checkpointer=None):
     g.add_node("read_scenario", partial(read_scenario, model=model))
     g.add_node("generate_configs", generate_configs)
     g.add_node("validate_configs", validate_configs)
+    g.add_node("publish_configs", publish_configs)
     g.add_node("launch_arena", launch_arena)
     g.add_node("generate_chaos", generate_chaos)
     g.add_node("summarize", summarize)
@@ -59,9 +61,10 @@ def build_workflow(model=None, checkpointer=None):
                             {"generate_configs": "generate_configs", END: END})
     g.add_edge("generate_configs", "validate_configs")
     g.add_conditional_edges("validate_configs", after_validate,
-                            {"launch_arena": "launch_arena",
+                            {"publish_configs": "publish_configs",
                              "read_scenario": "read_scenario",
                              "summarize": "summarize"})
+    g.add_edge("publish_configs", "launch_arena")
     g.add_edge("launch_arena", "generate_chaos")
     g.add_edge("generate_chaos", "summarize")
     # summarize FIRST, then ask the user whether to clean / do something else
