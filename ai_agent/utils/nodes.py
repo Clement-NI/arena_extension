@@ -1,8 +1,8 @@
 '''
 LangGraph nodes for the Arena orchestration workflow.
 
-The graph itself is assembled in ai_agent/workflow.py; this module only holds
-the node functions and their routers:
+The graph itself is assembled in ai_agent/utils/workflow.py; this module only
+holds the node functions and their routers:
 
     START -> read_scenario --(missing info: ask user)--> END (graph pauses)
                 |

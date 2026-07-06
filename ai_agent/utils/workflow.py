@@ -1,8 +1,9 @@
 '''
 Graph assembly for the Arena orchestration workflow.
 
-The node functions and routers live in ai_agent/utils/nodes.py; this module
-only wires them into a StateGraph and compiles it. Entry points:
+The node functions and routers live in ai_agent/utils/nodes.py (next to this
+module); this module only wires them into a StateGraph and compiles it.
+Entry points:
 
     build_workflow(model=None, checkpointer=None)
         Compile the graph. `model` overrides the extraction LLM (a provider-
