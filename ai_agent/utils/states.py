@@ -18,7 +18,7 @@ One state object is carried through the whole flow:
 
 from __future__ import annotations
 
-from typing import List, NotRequired, Optional
+from typing import List, Literal, NotRequired, Optional
 
 from langgraph.graph import MessagesState, StateGraph
 from pydantic import BaseModel, Field
@@ -81,6 +81,14 @@ class ScenarioSpec(BaseModel):
     clean: bool = Field(default=False, description="True only if the user explicitly asked to clean/tear down the cluster at the end")
 
 
+class NextAction(BaseModel):
+    """Classification of the user's answer after the summary."""
+
+    action: Literal["clean", "continue", "done"] = Field(
+        description="'clean' = tear the cluster down; 'continue' = the user wants "
+                    "another operation (new/changed scenario); 'done' = nothing else")
+
+
 # ---------------------------------------------------------------------------
 # Graph state
 # ---------------------------------------------------------------------------
@@ -109,6 +117,9 @@ class ArenaWorkflowState(MessagesState):
     chaos_apply_ok: Optional[bool]
     chaos_log: Optional[str]
 
-    # step 5 — cluster teardown (script 3)
+    # step 5 — post-summary decision (clean / continue / done)
+    next_action: Optional[str]
+
+    # step 6 — cluster teardown (script 3)
     clean_ok: Optional[bool]
     clean_log: Optional[str]

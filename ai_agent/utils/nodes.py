@@ -17,7 +17,13 @@ LangGraph nodes for the Arena orchestration workflow.
             generate_chaos    (tools/topology -> chaos.yaml; kubectl apply if asked)
                 |
                 v
-            summarize -> END
+            summarize         (report FIRST)
+                |-- spec.clean was asked upfront --> clean_cluster -> report_final -> END
+                v
+            ask_next          (interrupt(): "clean it, or something else?")
+                |-- "clean"    -> clean_cluster -> report_final -> END
+                |-- "continue" -> read_scenario  (answer becomes the next message)
+                '-- "done"     -> END
 
 Design rule: the LLM is used ONCE, in read_scenario, to extract a structured
 ScenarioSpec. Every artifact (nodes.json, topology.yaml, chaos.yaml) is composed
@@ -37,8 +43,9 @@ import yaml
 from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
 from ai_agent.system_prompts.system_prompt import EXTRACT_PROMPT
-from langchain_core.messages import AIMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import interrupt
 
 from ai_agent.configurations.setting import (
     DEFAULT_MODEL,
@@ -48,7 +55,7 @@ from ai_agent.configurations.setting import (
     streaming,
     temperature,
 )
-from ai_agent.utils.states import ArenaWorkflowState, ScenarioSpec
+from ai_agent.utils.states import ArenaWorkflowState, NextAction, ScenarioSpec
 
 from tools.topology.compiler import compile as compile_links
 from tools.topology.emitters import chaosmesh
@@ -255,12 +262,10 @@ def build_workflow(model=None, checkpointer=None):
             result["chaos_log"] = "skipped (not requested or cluster not launched)"
         return result
 
-    # -- 5. clean / tear down the cluster (script 3, only when asked) ---------
+    # -- 6. clean / tear down the cluster (script 3) ---------------------------
+    # Reached only when the user wants it: either spec.clean was set upfront,
+    # or they answered "clean" at the ask_next gate — so no extra gate here.
     def clean_cluster(state: ArenaWorkflowState) -> dict:
-        spec = ScenarioSpec(**state["scenario"])
-        if not spec.clean:
-            return {"clean_ok": None,
-                    "clean_log": "skipped (user did not ask to clean)"}
         try:
             r = subprocess.run(
                 ["bash", CLEAN_SCRIPT], cwd=TESTBED_DIR,
@@ -296,13 +301,61 @@ def build_workflow(model=None, checkpointer=None):
             lines.append(f"- kubectl apply : FAILED\n{_tail(state.get('chaos_log', ''), 400)}")
         else:
             lines.append("- kubectl apply : skipped")
-        if state.get("clean_ok") is True:
-            lines.append("- cluster clean : OK")
-        elif state.get("clean_ok") is False:
-            lines.append(f"- cluster clean : FAILED\n{_tail(state.get('clean_log', ''), 400)}")
-        else:
-            lines.append("- cluster clean : skipped")
         return {"messages": [AIMessage(content="\n".join(lines))]}
+
+    def after_summarize(state: ArenaWorkflowState) -> str:
+        if state.get("validation_error"):
+            return END                       # failure already reported
+        spec = ScenarioSpec(**state["scenario"])
+        if spec.clean:
+            return "clean_cluster"           # user asked upfront — no need to ask
+        return "ask_next"
+
+    # -- 5b. pause and ask the user what to do next ---------------------------
+    def ask_next(state: ArenaWorkflowState) -> dict:
+        answer = str(interrupt(
+            "The workflow finished (summary above). Should I clean the cluster "
+            "(tear it down), or would you like to do something else?"
+        ))
+        try:
+            verdict: NextAction = _get_llm(model).with_structured_output(NextAction).invoke(
+                [SystemMessage("Classify the user's reply after an Arena testbed run. "
+                               "'clean' = tear the cluster down now; 'continue' = they want "
+                               "another operation or a changed scenario; 'done' = nothing else."),
+                 HumanMessage(answer)]
+            )
+            action = verdict.action
+        except Exception:                    # weak model / no key: keyword fallback
+            low = answer.lower()
+            if any(k in low for k in ("clean", "tear", "delete", "清", "删")):
+                action = "clean"
+            elif any(k in low for k in ("no", "done", "nothing", "stop", "不用", "没有")):
+                action = "done"
+            else:
+                action = "continue"
+
+        out = {"next_action": action}
+        if action == "continue":
+            # feed the answer back into the conversation so read_scenario sees it
+            out["messages"] = [HumanMessage(content=answer)]
+        elif action == "done":
+            out["messages"] = [AIMessage(content="OK — leaving everything as it is. Bye!")]
+        return out
+
+    def after_ask(state: ArenaWorkflowState) -> str:
+        return {"clean": "clean_cluster",
+                "continue": "read_scenario",
+                "done": END}[state.get("next_action") or "done"]
+
+    # -- 6b. final report after cleaning --------------------------------------
+    def report_final(state: ArenaWorkflowState) -> dict:
+        if state.get("clean_ok") is True:
+            text = "Cluster cleaned successfully (3-clean_cluster.sh OK)."
+        elif state.get("clean_ok") is False:
+            text = f"Cluster clean FAILED:\n{_tail(state.get('clean_log', ''), 600)}"
+        else:
+            text = "Cluster clean skipped."
+        return {"messages": [AIMessage(content=text)]}
 
     # -- graph wiring ---------------------------------------------------------
     g = StateGraph(ArenaWorkflowState)
@@ -311,8 +364,10 @@ def build_workflow(model=None, checkpointer=None):
     g.add_node("validate_configs", validate_configs)
     g.add_node("launch_arena", launch_arena)
     g.add_node("generate_chaos", generate_chaos)
-    g.add_node("clean_cluster", clean_cluster)
     g.add_node("summarize", summarize)
+    g.add_node("ask_next", ask_next)
+    g.add_node("clean_cluster", clean_cluster)
+    g.add_node("report_final", report_final)
 
     g.add_edge(START, "read_scenario")
     g.add_conditional_edges("read_scenario", after_read,
@@ -323,9 +378,16 @@ def build_workflow(model=None, checkpointer=None):
                              "read_scenario": "read_scenario",
                              "summarize": "summarize"})
     g.add_edge("launch_arena", "generate_chaos")
-    g.add_edge("generate_chaos", "clean_cluster")
-    g.add_edge("clean_cluster", "summarize")
-    g.add_edge("summarize", END)
+    g.add_edge("generate_chaos", "summarize")
+    # summarize FIRST, then ask the user whether to clean / do something else
+    g.add_conditional_edges("summarize", after_summarize,
+                            {"clean_cluster": "clean_cluster",
+                             "ask_next": "ask_next", END: END})
+    g.add_conditional_edges("ask_next", after_ask,
+                            {"clean_cluster": "clean_cluster",
+                             "read_scenario": "read_scenario", END: END})
+    g.add_edge("clean_cluster", "report_final")
+    g.add_edge("report_final", END)
 
     return g.compile(checkpointer=checkpointer)
 
