@@ -86,8 +86,8 @@ TESTBED_DIR = _PROJECT_ROOT / "arena_testbed"
 load_dotenv(_PROJECT_ROOT / "ai_agent" / ".env")
 
 MAX_GENERATION_RETRIES = max_retries
-# Launch = scripts 0/1/2 only. Cleaning is a SEPARATE node (clean_cluster):
-# putting 3-clean here would tear the cluster down right after launching it.
+
+
 LAUNCH_SCRIPTS = ["0-set_environments.sh", "1-launch_cluster.sh", "2-set_frameworks.sh"]
 CLEAN_SCRIPT = "3-clean_cluster.sh"
 
@@ -179,6 +179,7 @@ def validate_configs(state: ArenaWorkflowState) -> dict:
 
 def after_validate(state: ArenaWorkflowState) -> str:
     if not state.get("validation_error"):
+        # write_config_file.invoke()
         return "launch_arena"
     if state.get("generation_retries", 0) <= MAX_GENERATION_RETRIES:
         return "read_scenario"
