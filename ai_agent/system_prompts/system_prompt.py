@@ -104,4 +104,7 @@ Read the whole conversation and fill the ScenarioSpec:
 If anything essential is missing or contradictory (node counts per tier, which
 node is control-plane when ambiguous), set complete=false and put ONE concise
 question in `question`. Do not invent what the user did not say.
+
+complete=true is ONLY valid when `nodes` is non-empty: every node the user
+asked for must appear in `nodes`, fully filled (name, tier, role, cpu, memory).
 """

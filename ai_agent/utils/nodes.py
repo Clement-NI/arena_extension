@@ -57,6 +57,7 @@ from langgraph.types import interrupt
 
 from ai_agent.configurations.setting import (
     DEFAULT_MODEL,
+    generation_max_retries,
     max_retries,
     max_token,
     model_time_out,
@@ -87,7 +88,9 @@ TESTBED_DIR = _PROJECT_ROOT / "arena_testbed"
 # API keys live in ai_agent/.env (gitignored); load them for standalone use too.
 load_dotenv(_PROJECT_ROOT / "ai_agent" / ".env")
 
-MAX_GENERATION_RETRIES = max_retries
+# validation-failure loops back to a fresh LLM extraction; keep this small —
+# it is NOT the transport retry count (that's max_retries on the LLM call).
+MAX_GENERATION_RETRIES = generation_max_retries
 
 
 LAUNCH_SCRIPTS = ["0-set_environments.sh", "1-launch_cluster.sh", "2-set_frameworks.sh"]

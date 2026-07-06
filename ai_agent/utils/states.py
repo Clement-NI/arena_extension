@@ -21,7 +21,7 @@ from __future__ import annotations
 from typing import List, Literal, NotRequired, Optional
 
 from langgraph.graph import MessagesState, StateGraph
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing_extensions import TypedDict
 
 
@@ -79,6 +79,22 @@ class ScenarioSpec(BaseModel):
     launch: bool = Field(default=False, description="True only if the user explicitly asked to launch/deploy the cluster")
     apply_chaos: bool = Field(default=False, description="True only if the user explicitly asked to apply the chaos with kubectl")
     clean: bool = Field(default=False, description="True only if the user explicitly asked to clean/tear down the cluster at the end")
+
+    @model_validator(mode="after")
+    def _complete_requires_nodes(self):
+        """Weak models sometimes return complete=true with an empty node list
+        (nodes has a default, so plain schema validation lets it through).
+        Downgrade that to an incomplete spec with a clarifying question, so the
+        workflow asks the user instead of generating an empty nodes.json and
+        burning validation retries."""
+        if self.complete and not self.nodes:
+            self.complete = False
+            if not self.question:
+                self.question = (
+                    "I couldn't extract any nodes from your request. How many "
+                    "nodes do you want per tier (IoT / Edge / Cloud), and which "
+                    "node should be the control-plane?")
+        return self
 
 
 class NextAction(BaseModel):

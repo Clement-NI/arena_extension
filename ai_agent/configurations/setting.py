@@ -12,6 +12,11 @@ temperature = 0.5
 model_time_out  = 600
 max_token = 25000
 streaming = True
-max_retries = 10
+max_retries = 10          # transport-level retries of one LLM call (429s etc.)
+
+## Setting of the workflow
+# how many times a failed validation loops back to re-extraction before giving
+# up — each loop is a fresh LLM call, so keep this small.
+generation_max_retries = 3
 
 
