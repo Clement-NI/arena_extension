@@ -89,10 +89,14 @@ computing continuum (IoT -> Edge -> Cloud) as a kind Kubernetes cluster and
 shapes the network between tiers with Chaos Mesh.
 
 Read the whole conversation and fill the ScenarioSpec:
-- nodes: every Kubernetes node with name / tier / role / cpu / memory.
-  Exactly ONE node must have role "control-plane". Use names like "IoT-1",
-  "Edge-2", "Cloud-1". Reasonable defaults: IoT 1cpu/2Gi, Edge 2cpu/4Gi,
-  Cloud 4cpu/8Gi.
+- tier_groups (PREFERRED): declare nodes as tier + count, e.g.
+  [{tier "IoT", count 34, cpu "1", memory "2Gi"}, {tier "Edge", count 33, ...}].
+  Node names are auto-generated (IoT-1..IoT-34). NEVER enumerate dozens of
+  similar nodes one by one, and NEVER abbreviate a list with "..." or comments.
+  Set control_plane to the node that is the control plane, e.g. "Cloud-1".
+- nodes: only for small or irregular clusters where nodes differ individually
+  (name / tier / role / cpu / memory each). Exactly ONE control-plane overall.
+  Reasonable defaults: IoT 1cpu/2Gi, Edge 2cpu/4Gi, Cloud 4cpu/8Gi.
 - rules: only the inter-region network rules the user actually asked for
   (regions are lowercased tier names, e.g. edge -> cloud, latency "30ms",
   bw "100Mbit"). Leave fields empty when the user did not specify them.

@@ -37,7 +37,7 @@ def _compose_nodes_json(spec: ScenarioSpec) -> dict:
                 "nodes": [
                     {"name": n.name, "tier": n.tier, "role": n.role,
                      "cpu": n.cpu, "memory": n.memory}
-                    for n in spec.nodes
+                    for n in spec.expanded_nodes()
                 ],
             }
         ],
@@ -47,7 +47,7 @@ def _compose_nodes_json(spec: ScenarioSpec) -> dict:
 def _compose_topology_yaml(spec: ScenarioSpec) -> dict:
     # regions = lowercased tiers, members = worker nodes of that tier
     regions: dict = {}
-    for n in spec.nodes:
+    for n in spec.expanded_nodes():
         if n.role != "worker":
             continue
         regions.setdefault(n.tier.lower(), {"members": []})["members"].append(n.name)

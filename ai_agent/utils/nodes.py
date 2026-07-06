@@ -131,9 +131,22 @@ def read_scenario(state: ArenaWorkflowState, model=None) -> dict:
             f"  {state['validation_error']}\n"
             "Fix the spec accordingly."
         )
-    spec: ScenarioSpec = llm.with_structured_output(ScenarioSpec).invoke(
-        [SystemMessage(sys_prompt)] + list(state["messages"])
-    )
+    try:
+        spec: ScenarioSpec = llm.with_structured_output(ScenarioSpec).invoke(
+            [SystemMessage(sys_prompt)] + list(state["messages"])
+        )
+    except Exception as e:
+        # Weak models sometimes emit unparseable output (YAML fences, comments,
+        # "..." ellipses) instead of the structured object — don't crash the
+        # graph, ask the user to restate compactly (tier counts parse best).
+        msg = (
+            "I couldn't parse the scenario from the model's answer "
+            f"({type(e).__name__}: {str(e)[:150]}...).\n"
+            "Please restate it compactly, e.g.: "
+            "'IoT x34, Edge x33, Cloud x33, Cloud-1 is the control plane, "
+            "30ms/100Mbit between edge and cloud'."
+        )
+        return {"info_complete": False, "messages": [AIMessage(content=msg)]}
     if not spec.complete:
         q = spec.question or "Could you give more details about the nodes per tier?"
         return {"info_complete": False, "scenario": spec.model_dump(),

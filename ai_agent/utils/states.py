@@ -53,6 +53,17 @@ class NodeSpec(BaseModel):
     memory: str = Field(default="4Gi", description="Memory, e.g. '8Gi'")
 
 
+class TierGroup(BaseModel):
+    """Many identical nodes declared as tier + count (preferred for big
+    clusters — the model outputs 3 lines instead of enumerating 100 nodes;
+    names are auto-generated as Tier-1..Tier-N by the workflow)."""
+
+    tier: str = Field(description="Tier name, e.g. 'IoT', 'Edge', 'Cloud'")
+    count: int = Field(ge=1, description="How many nodes of this tier")
+    cpu: str = Field(default="2", description="CPU per node, e.g. '1'")
+    memory: str = Field(default="4Gi", description="Memory per node, e.g. '2Gi'")
+
+
 class LinkRule(BaseModel):
     """Network rule between two regions (regions are lowercased tier names)."""
 
@@ -70,7 +81,15 @@ class ScenarioSpec(BaseModel):
     complete: bool = Field(description="True only if enough information was given to build the cluster")
     question: str = Field(default="", description="If not complete: ONE concise clarifying question for the user")
     cluster_name: str = Field(default="arena-testbed")
-    nodes: List[NodeSpec] = Field(default_factory=list, description="All nodes incl. exactly one control-plane")
+    nodes: List[NodeSpec] = Field(default_factory=list,
+                                  description="Explicitly named nodes (small/irregular clusters only)")
+    tier_groups: List[TierGroup] = Field(default_factory=list,
+                                         description="PREFERRED for many similar nodes: tier + count "
+                                                     "(names auto-generated Tier-1..Tier-N). Do not also "
+                                                     "repeat these nodes in `nodes`.")
+    control_plane: str = Field(default="",
+                               description="Name of the control-plane node, e.g. 'Cloud-1'. "
+                                           "Required with tier_groups; defaults to the first node.")
     rules: List[LinkRule] = Field(default_factory=list, description="Inter-region network rules the user asked for")
     default_intra_latency: str = Field(default="1ms", description="Default latency inside a region")
     default_intra_bw: str = Field(default="1Gbit")
@@ -87,7 +106,7 @@ class ScenarioSpec(BaseModel):
         Downgrade that to an incomplete spec with a clarifying question, so the
         workflow asks the user instead of generating an empty nodes.json and
         burning validation retries."""
-        if self.complete and not self.nodes:
+        if self.complete and not self.nodes and not self.tier_groups:
             self.complete = False
             if not self.question:
                 self.question = (
@@ -95,6 +114,21 @@ class ScenarioSpec(BaseModel):
                     "nodes do you want per tier (IoT / Edge / Cloud), and which "
                     "node should be the control-plane?")
         return self
+
+    def expanded_nodes(self) -> List[NodeSpec]:
+        """Explicit nodes + tier_groups expanded to concrete NodeSpecs, with
+        exactly one control-plane marked (by `control_plane` name, falling back
+        to the first node when none matches)."""
+        out = [n.model_copy() for n in self.nodes]
+        for g in self.tier_groups:
+            for i in range(1, g.count + 1):
+                out.append(NodeSpec(name=f"{g.tier}-{i}", tier=g.tier,
+                                    role="worker", cpu=g.cpu, memory=g.memory))
+        if not any(n.role == "control-plane" for n in out) and out:
+            cp = self.control_plane.strip().lower()
+            target = next((n for n in out if n.name.lower() == cp), out[0])
+            target.role = "control-plane"
+        return out
 
 
 class NextAction(BaseModel):
