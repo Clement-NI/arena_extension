@@ -1,7 +1,8 @@
 {
   "dependencies": [".."],
   "graphs": {
-    "arena_agent": "ai_agent.ai_chatbot.ai_chatbot:make_graph"
+    "arena_agent": "ai_agent.ai_chatbot.ai_chatbot:make_graph",
+    "arena_workflow": "ai_agent.utils.nodes:make_workflow_graph"
   },
   "env": "./.env"
 }
