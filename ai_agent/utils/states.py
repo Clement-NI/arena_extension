@@ -1,3 +1,14 @@
+from typing import NotRequired
+from typing_extensions import TypedDict
+from langgraph.graph import StateGraph
+
+
+class State(TypedDict):
+    messages: list
+    summary: NotRequired[str]
+
+
+builder = StateGraph(State)
 '''
 State schema for the Arena orchestration workflow.
 

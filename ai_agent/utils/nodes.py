@@ -1,3 +1,4 @@
+
 '''
 LangGraph nodes for the Arena orchestration workflow.
 
@@ -35,6 +36,7 @@ from typing import Optional
 import yaml
 from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
+from ai_agent.system_prompts import system_prompt
 from langchain_core.messages import AIMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
 
@@ -64,30 +66,10 @@ TESTBED_DIR = _PROJECT_ROOT / "arena_testbed"
 # API keys live in ai_agent/.env (gitignored); load them for standalone use too.
 load_dotenv(_PROJECT_ROOT / "ai_agent" / ".env")
 
-MAX_GENERATION_RETRIES = 2
+MAX_GENERATION_RETRIES = max_retries
 LAUNCH_SCRIPTS = ["0-set_environments.sh", "1-launch_cluster.sh", "2-set_frameworks.sh"]
 
-_EXTRACT_PROMPT = """\
-You are the scenario reader of the Arena testbed workflow. Arena emulates a
-computing continuum (IoT -> Edge -> Cloud) as a kind Kubernetes cluster and
-shapes the network between tiers with Chaos Mesh.
-
-Read the whole conversation and fill the ScenarioSpec:
-- nodes: every Kubernetes node with name / tier / role / cpu / memory.
-  Exactly ONE node must have role "control-plane". Use names like "IoT-1",
-  "Edge-2", "Cloud-1". Reasonable defaults: IoT 1cpu/2Gi, Edge 2cpu/4Gi,
-  Cloud 4cpu/8Gi.
-- rules: only the inter-region network rules the user actually asked for
-  (regions are lowercased tier names, e.g. edge -> cloud, latency "30ms",
-  bw "100Mbit"). Leave fields empty when the user did not specify them.
-- launch: true ONLY if the user explicitly asked to launch/deploy the cluster.
-- apply_chaos: true ONLY if the user explicitly asked to apply the chaos rules.
-
-If anything essential is missing or contradictory (node counts per tier, which
-node is control-plane when ambiguous), set complete=false and put ONE concise
-question in `question`. Do not invent what the user did not say.
-"""
-
+_EXTRACT_PROMPT = system_prompt
 
 def _get_llm(model=None):
     """Build the extraction LLM lazily so importing this module needs no API key."""
