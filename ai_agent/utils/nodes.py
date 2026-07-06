@@ -67,7 +67,7 @@ TESTBED_DIR = _PROJECT_ROOT / "arena_testbed"
 load_dotenv(_PROJECT_ROOT / "ai_agent" / ".env")
 
 MAX_GENERATION_RETRIES = max_retries
-LAUNCH_SCRIPTS = ["0-set_environments.sh", "1-launch_cluster.sh", "2-set_frameworks.sh"]
+LAUNCH_SCRIPTS = ["0-set_environments.sh", "1-launch_cluster.sh", "2-set_frameworks.sh","3b-clean-multihost.sh"]
 
 _EXTRACT_PROMPT = system_prompt
 
@@ -251,6 +251,10 @@ def build_workflow(model=None, checkpointer=None):
             result["chaos_apply_ok"] = None
             result["chaos_log"] = "skipped (not requested or cluster not launched)"
         return result
+
+    def clean_cluster(state:ArenaWorkflowState)  -> dict:
+
+        return None
 
     # -- 5. summarize ---------------------------------------------------------
     def summarize(state: ArenaWorkflowState) -> dict:
