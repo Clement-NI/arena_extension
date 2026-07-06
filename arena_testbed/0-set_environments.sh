@@ -57,17 +57,37 @@ mv linux-amd64/helm /usr/local/bin/helm
 rm -rf linux-amd64/
 rm -f helm-v3.17.4-linux-amd64.tar.gz
 
-sudo bash -c 'cat > /etc/docker/daemon.json <<EOF
-{
-  "default-ulimits": {
-    "nofile": {
-      "Name": "nofile",
-      "Soft": 1048576,
-      "Hard": 1048576
-    }
-  }
-}
-EOF'
+# ── docker daemon config: MERGE into the existing daemon.json, never clobber
+# it (a hand-tuned data-root must survive re-runs of this script). When / is
+# small and /tmp is a separate, much larger filesystem (the Grid'5000 layout),
+# auto-pick /tmp/docker-data as data-root so the kind nodes don't fill /.
+# Override with DOCKER_DATA_ROOT=<path> (or DOCKER_DATA_ROOT=none to skip).
+DAEMON_JSON=/etc/docker/daemon.json
+existing_cfg="{}"
+[[ -s "$DAEMON_JSON" ]] && existing_cfg=$(cat "$DAEMON_JSON")
+
+data_root=$(echo "$existing_cfg" | jq -r '."data-root" // empty')
+if [[ -z "$data_root" && "${DOCKER_DATA_ROOT:-auto}" != "none" ]]; then
+  if [[ -n "${DOCKER_DATA_ROOT:-}" && "${DOCKER_DATA_ROOT}" != "auto" ]]; then
+    data_root="$DOCKER_DATA_ROOT"
+  else
+    root_dev=$(df --output=source /    | tail -1)
+    tmp_dev=$(df  --output=source /tmp | tail -1)
+    root_kb=$(df -k --output=size /    | tail -1)
+    tmp_kb=$(df  -k --output=size /tmp | tail -1)
+    if [[ "$tmp_dev" != "$root_dev" ]] && (( tmp_kb > 2 * root_kb )); then
+      data_root=/tmp/docker-data
+      log_info "Small / with large separate /tmp — using docker data-root $data_root"
+    fi
+  fi
+fi
+
+merged_cfg=$(echo "$existing_cfg" | jq --arg dr "$data_root" '
+  ."default-ulimits".nofile = {"Name": "nofile", "Soft": 1048576, "Hard": 1048576}
+  | if $dr != "" then ."data-root" = $dr else . end')
+echo "$merged_cfg" | sudo tee "$DAEMON_JSON" >/dev/null
+[[ -n "$data_root" ]] && sudo mkdir -p "$data_root"
+log_info "docker daemon.json now: $(tr -d '\n ' < "$DAEMON_JSON")"
 
 sudo systemctl daemon-reload
 sudo systemctl restart docker
