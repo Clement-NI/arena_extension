@@ -81,6 +81,7 @@ class ScenarioSpec(BaseModel):
     complete: bool = Field(description="True only if enough information was given to build the cluster")
     question: str = Field(default="", description="If not complete: ONE concise clarifying question for the user")
     cluster_name: str = Field(default="arena-testbed")
+
     nodes: List[NodeSpec] = Field(default_factory=list,
                                   description="Explicitly named nodes (small/irregular clusters only)")
     tier_groups: List[TierGroup] = Field(default_factory=list,
