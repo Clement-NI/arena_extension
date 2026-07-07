@@ -30,26 +30,18 @@ apt-get install -y ca-certificates curl sudo python3-pip python3 vim wget git ne
 echo 'set mouse=' >> ~/.vimrc
 swapoff -a
 pip3 install requests pyyaml
-# Skip the docker install when a working docker is already present (e.g.
-# Grid'5000 nodes ship one, often NEWER than our pin — installing the pinned
-# version would be a downgrade, which apt -y refuses without
-# --allow-downgrades and the whole bootstrap dies).
-if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-  log_info "docker already installed and running: $(docker --version) — skipping docker install"
-else
-  install -m 0755 -d /etc/apt/keyrings
-  curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
-  chmod a+r /etc/apt/keyrings/docker.asc
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+chmod a+r /etc/apt/keyrings/docker.asc
 
-  echo \
-    "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
-    $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
-    tee /etc/apt/sources.list.d/docker.list > /dev/null
-  apt-get update
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
+  $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+  tee /etc/apt/sources.list.d/docker.list > /dev/null
+apt-get update
 
-  VERSION_STRING=5:28.0.4-1~debian.11~bullseye
-  apt-get install -y --allow-downgrades docker-ce=$VERSION_STRING docker-ce-cli=$VERSION_STRING containerd.io docker-buildx-plugin docker-compose-plugin
-fi
+VERSION_STRING=5:28.0.4-1~debian.11~bullseye
+apt-get install -y docker-ce=$VERSION_STRING docker-ce-cli=$VERSION_STRING containerd.io docker-buildx-plugin docker-compose-plugin
 
 wget https://get.helm.sh/helm-v3.17.4-linux-amd64.tar.gz
 tar -zxvf helm-v3.17.4-linux-amd64.tar.gz
