@@ -94,7 +94,7 @@ MAX_GENERATION_RETRIES = generation_max_retries
 
 
 LAUNCH_SCRIPTS = ["0-set_environments.sh", "1-launch_cluster.sh", "2-set_frameworks.sh"]
-CLEAN_SCRIPT = "3-clean_cluster.sh"
+CLEAN_SCRIPT = "3b-clean-multihost.sh"
 
 _EXTRACT_PROMPT = EXTRACT_PROMPT
 
