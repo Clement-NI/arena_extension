@@ -399,7 +399,7 @@ def clean_cluster(state: ArenaWorkflowState) -> dict:
 
 def report_final(state: ArenaWorkflowState) -> dict:
     if state.get("clean_ok") is True:
-        text = "Cluster cleaned successfully (3-clean_cluster.sh OK)."
+        text = "Cluster cleaned successfully (3b-clean-multihost.sh OK)."
     elif state.get("clean_ok") is False:
         text = f"Cluster clean FAILED:\n{_tail(state.get('clean_log', ''), 600)}"
     else:
