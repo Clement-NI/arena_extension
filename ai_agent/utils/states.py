@@ -86,6 +86,21 @@ class LinkRule(BaseModel):
     loss: str = Field(default="", description="Packet loss %, e.g. '0.5' (empty = unset)")
     jitter: str = Field(default="", description="Delay variation, e.g. '5ms' (empty = unset)")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_alternate_keys(cls, data):
+        """Weak models rename the endpoints (observed with gemma: source/
+        destination one run, region/target another). Accept the common
+        aliases instead of failing the whole extraction."""
+        if isinstance(data, dict):
+            for alt in ("source", "region", "from", "src"):
+                if "from_region" not in data and alt in data:
+                    data["from_region"] = data.pop(alt)
+            for alt in ("destination", "target", "to", "dst"):
+                if "to_region" not in data and alt in data:
+                    data["to_region"] = data.pop(alt)
+        return data
+
 
 class ScenarioSpec(BaseModel):
     """Everything the workflow needs, extracted from the conversation."""
@@ -114,6 +129,23 @@ class ScenarioSpec(BaseModel):
     launch: bool = Field(default=False, description="True only if the user explicitly asked to launch/deploy the cluster")
     apply_chaos: bool = Field(default=False, description="True only if the user explicitly asked to apply the chaos with kubectl")
     clean: bool = Field(default=False, description="True only if the user explicitly asked to clean/tear down the cluster at the end")
+
+    @model_validator(mode="after")
+    def _absorb_intra_rules(self):
+        """Models often encode 'inside each tier: 1ms/400Mbit' as self-pair
+        rules (cloud -> cloud). Those belong in the intra-region defaults:
+        absorb them there and keep only genuine inter-region rules."""
+        inter = []
+        for r in self.rules:
+            if r.from_region.strip().lower() == r.to_region.strip().lower():
+                if r.latency:
+                    self.default_intra_latency = r.latency
+                if r.bw:
+                    self.default_intra_bw = r.bw
+            else:
+                inter.append(r)
+        self.rules = inter
+        return self
 
     @model_validator(mode="after")
     def _complete_requires_nodes(self):
