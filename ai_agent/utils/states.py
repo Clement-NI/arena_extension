@@ -74,8 +74,6 @@ class HostSpec(BaseModel):
     context: str = Field(description="docker context name: 'default' for the manager "
                                      "(first host), otherwise the hostname, e.g. 'ecotype-7'")
     addr: str = Field(default="", description="Reachable IP of this machine, e.g. '172.16.193.7'")
-    ssh: str = Field(default="", description="ssh URL for non-manager hosts, e.g. "
-                                             "'ssh://root@ecotype-7'; empty for the manager")
 
 
 class LinkRule(BaseModel):
