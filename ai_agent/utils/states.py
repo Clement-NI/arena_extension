@@ -89,16 +89,28 @@ class LinkRule(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _accept_alternate_keys(cls, data):
-        """Weak models rename the endpoints (observed with gemma: source/
-        destination one run, region/target another). Accept the common
-        aliases instead of failing the whole extraction."""
-        if isinstance(data, dict):
-            for alt in ("source", "region", "from", "src"):
-                if "from_region" not in data and alt in data:
-                    data["from_region"] = data.pop(alt)
-            for alt in ("destination", "target", "to", "dst"):
-                if "to_region" not in data and alt in data:
-                    data["to_region"] = data.pop(alt)
+        """Weak models keep renaming the endpoints (observed with gemma:
+        source/destination, region/target, region/remote — a new pair almost
+        every run). Map the known aliases first, then as a last resort treat
+        the remaining unknown string-valued keys, in output order, as the
+        from/to endpoints. The metric keys are stable, only the endpoints
+        get creative names."""
+        if not isinstance(data, dict):
+            return data
+        for alt in ("source", "region", "from", "src", "origin"):
+            if "from_region" not in data and alt in data:
+                data["from_region"] = data.pop(alt)
+        for alt in ("destination", "target", "to", "dst", "remote", "peer", "dest"):
+            if "to_region" not in data and alt in data:
+                data["to_region"] = data.pop(alt)
+        known = {"from_region", "to_region", "latency", "bw", "loss", "jitter", "comment"}
+        leftovers = [k for k, v in data.items()
+                     if k not in known and isinstance(v, str)]
+        for k in leftovers:
+            if "from_region" not in data:
+                data["from_region"] = data.pop(k)
+            elif "to_region" not in data:
+                data["to_region"] = data.pop(k)
         return data
 
 
