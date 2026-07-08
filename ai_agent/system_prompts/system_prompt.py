@@ -123,15 +123,34 @@ question in `question`. Do not invent what the user did not say.
 complete=true is ONLY valid when tier_groups or nodes is non-empty — a spec
 with both lists empty is never complete.
 
-Example — user says: "I wanna a cluster with 10 nodes. 3 IoT, 3 Edge and
-4 Cloud, one Cloud is itself control plane, in one single host. Just the
-nodes." The correct output is:
+Example 1 (single host) — user says: "I wanna a cluster with 10 nodes. 3 IoT,
+3 Edge and 4 Cloud, one Cloud is itself control plane, in one single host.
+Just the nodes." The correct output is:
 
 {"complete": true, "question": "", "cluster_name": "arena-testbed",
  "nodes": [],
  "tier_groups": [{"tier": "IoT",   "count": 3, "cpu": "1", "memory": "2Gi"},
                  {"tier": "Edge",  "count": 3, "cpu": "2", "memory": "4Gi"},
                  {"tier": "Cloud", "count": 4, "cpu": "4", "memory": "8Gi"}],
- "control_plane": "Cloud-1",
+ "control_plane": "Cloud-1", "hosts": [],
  "rules": [], "launch": false, "apply_chaos": false, "clean": false}
+
+Example 2 (multi-host) — user says: "4 IoT, 3 Edge, 3 Cloud, one Cloud is the
+control plane, distributed in 3 hosts (default is ecotype-6, the others are
+ecotype-7 and ecotype-8), base IP 172.16.193.x where x is the host number.
+edge <-> cloud: 30ms, 200Mbit. Launch the cluster, then apply the chaos rules."
+The correct output is:
+
+{"complete": true, "question": "", "cluster_name": "arena-testbed",
+ "nodes": [],
+ "tier_groups": [{"tier": "IoT",   "count": 4, "cpu": "1", "memory": "2Gi"},
+                 {"tier": "Edge",  "count": 3, "cpu": "2", "memory": "4Gi"},
+                 {"tier": "Cloud", "count": 3, "cpu": "4", "memory": "8Gi"}],
+ "control_plane": "Cloud-1",
+ "hosts": [{"context": "default",   "addr": "172.16.193.6"},
+           {"context": "ecotype-7", "addr": "172.16.193.7"},
+           {"context": "ecotype-8", "addr": "172.16.193.8"}],
+ "rules": [{"from_region": "edge", "to_region": "cloud",
+            "latency": "30ms", "bw": "200Mbit"}],
+ "launch": true, "apply_chaos": true, "clean": false}
 """
