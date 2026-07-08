@@ -272,10 +272,8 @@ def generate_chaos(state: ArenaWorkflowState) -> dict:
             # All NetworkChaos resources live in the arena-net namespace (see
             # tools/topology/emitters/chaosmesh.CHAOS_NAMESPACE); nothing else
             # creates it in the workflow path, so ensure it exists first.
-            ns = subprocess.run(["kubectl", "get", "namespace", "arena-net"],
-                                capture_output=True, text=True, timeout=60)
-            if ns.returncode != 0:
-                subprocess.run(["kubectl", "create", "namespace", "arena-net"],
+
+            subprocess.run(["kubectl", "create", "namespace", "arena-net"],
                                capture_output=True, text=True, timeout=60)
             r = subprocess.run(
                 ["kubectl", "apply", "-f", str(chaos_path)],
