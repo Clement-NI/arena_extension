@@ -378,17 +378,38 @@ def after_ask(state: ArenaWorkflowState) -> str:
 # Reached only when the user wants it: either spec.clean was set upfront,
 # or they answered "clean" at the ask_next gate — so no extra gate here.
 
+def _worker_hosts(state: ArenaWorkflowState) -> list:
+    """Non-default docker contexts of the testbed — 3b-clean-multihost.sh
+    takes them as arguments to also clean the remote machines. Prefer the
+    scenario; fall back to the published arena_testbed/nodes.json."""
+    try:
+        spec = ScenarioSpec(**(state.get("scenario") or {}))
+        workers = [h.context for h in spec.hosts if h.context != "default"]
+        if workers:
+            return workers
+    except Exception:
+        pass
+    try:
+        data = json.loads((TESTBED_DIR / "nodes.json").read_text())
+        return [h.get("context") for h in data.get("hosts", [])
+                if h.get("context") and h.get("context") != "default"]
+    except Exception:
+        return []
+
+
 def clean_cluster(state: ArenaWorkflowState) -> dict:
+    workers = _worker_hosts(state)
+    cmd = ["bash", CLEAN_SCRIPT, *workers]
     try:
         r = subprocess.run(
-            ["bash", CLEAN_SCRIPT], cwd=TESTBED_DIR,
+            cmd, cwd=TESTBED_DIR,
             capture_output=True, text=True, timeout=900,
         )
         return {"clean_ok": r.returncode == 0,
-                "clean_log": f"$ {CLEAN_SCRIPT} (exit {r.returncode})\n"
+                "clean_log": f"$ {' '.join(cmd)} (exit {r.returncode})\n"
                              f"{_tail(r.stdout + r.stderr)}"}
     except Exception as e:                       # bash missing, timeout…
-        return {"clean_ok": False, "clean_log": f"$ {CLEAN_SCRIPT} FAILED: {e}"}
+        return {"clean_ok": False, "clean_log": f"$ {' '.join(cmd)} FAILED: {e}"}
 
 
 # ---------------------------------------------------------------------------
