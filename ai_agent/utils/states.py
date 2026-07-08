@@ -64,6 +64,20 @@ class TierGroup(BaseModel):
     memory: str = Field(default="4Gi", description="Memory per node, e.g. '2Gi'")
 
 
+class HostSpec(BaseModel):
+    """One physical machine of a multi-host testbed.
+
+    The FIRST host is the manager and must have context "default". Node
+    placement across hosts is decided deterministically by the workflow
+    (control-plane on the first host, workers round-robin)."""
+
+    context: str = Field(description="docker context name: 'default' for the manager "
+                                     "(first host), otherwise the hostname, e.g. 'ecotype-7'")
+    addr: str = Field(default="", description="Reachable IP of this machine, e.g. '172.16.193.7'")
+    ssh: str = Field(default="", description="ssh URL for non-manager hosts, e.g. "
+                                             "'ssh://root@ecotype-7'; empty for the manager")
+
+
 class LinkRule(BaseModel):
     """Network rule between two regions (regions are lowercased tier names)."""
 
@@ -91,6 +105,9 @@ class ScenarioSpec(BaseModel):
     control_plane: str = Field(default="",
                                description="Name of the control-plane node, e.g. 'Cloud-1'. "
                                            "Required with tier_groups; defaults to the first node.")
+    hosts: List[HostSpec] = Field(default_factory=list,
+                                  description="ONLY for multi-host testbeds: the physical machines. "
+                                              "First = manager (context 'default'). Empty = single host.")
     rules: List[LinkRule] = Field(default_factory=list, description="Inter-region network rules the user asked for")
     default_intra_latency: str = Field(default="1ms", description="Default latency inside a region")
     default_intra_bw: str = Field(default="1Gbit")

@@ -100,6 +100,18 @@ Read the whole conversation and fill the ScenarioSpec:
 - rules: only the inter-region network rules the user actually asked for
   (regions are lowercased tier names, e.g. edge -> cloud, latency "30ms",
   bw "100Mbit"). Leave fields empty when the user did not specify them.
+- hosts: ONLY when the user asks for multiple hosts/machines. The FIRST entry
+  is the manager and its context MUST be "default"; other hosts use their
+  hostname as context, their IP as addr, and ssh "ssh://root@<hostname>"
+  unless the user says otherwise. Example — "distributed on 3 hosts, default
+  is ecotype-6, others ecotype-7 and ecotype-8, base IP 172.16.193.<host
+  number>" becomes:
+    hosts: [{"context": "default",   "addr": "172.16.193.6", "ssh": ""},
+            {"context": "ecotype-7", "addr": "172.16.193.7", "ssh": "ssh://root@ecotype-7"},
+            {"context": "ecotype-8", "addr": "172.16.193.8", "ssh": "ssh://root@ecotype-8"}]
+  Node placement across hosts is automatic (control-plane on the first host,
+  workers spread round-robin) — do NOT assign nodes to hosts yourself.
+  Single host = leave hosts empty.
 - launch: true ONLY if the user explicitly asked to launch/deploy the cluster.
 - apply_chaos: true ONLY if the user explicitly asked to apply the chaos rules.
 - clean: true ONLY if the user explicitly asked to clean / tear down the

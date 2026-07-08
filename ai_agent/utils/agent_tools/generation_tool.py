@@ -13,7 +13,7 @@ from typing import Union
 import yaml
 from langchain_core.tools import tool
 
-from ai_agent.utils.states import ScenarioSpec
+from ai_agent.utils.states import HostSpec, ScenarioSpec
 from tools.topology.compiler import compile as _compile
 from tools.topology.emitters import chaosmesh as _chaosmesh
 from tools.topology.emitters import csv as _csv
@@ -27,19 +27,34 @@ from tools.topology.schema import load_topology
 # ---------------------------------------------------------------------------
 
 def _compose_nodes_json(spec: ScenarioSpec) -> dict:
+    all_nodes = [{"name": n.name, "tier": n.tier, "role": n.role,
+                  "cpu": n.cpu, "memory": n.memory}
+                 for n in spec.expanded_nodes()]
+
+    # single host (default) unless the spec declares machines
+    hosts = spec.hosts or [HostSpec(context="default", addr="127.0.0.1", ssh="")]
+
+    # deterministic placement: the control-plane lives on the first host
+    # (Arena requirement), workers round-robin across all hosts
+    buckets: list = [[] for _ in hosts]
+    workers = [n for n in all_nodes if n["role"] != "control-plane"]
+    for cp in (n for n in all_nodes if n["role"] == "control-plane"):
+        buckets[0].append(cp)
+    for i, n in enumerate(workers):
+        buckets[i % len(hosts)].append(n)
+
     return {
         "cluster_name": spec.cluster_name,
         "hosts": [
             {
-                "context": "default",
-                "addr": "127.0.0.1",
-                "ssh": "",
-                "nodes": [
-                    {"name": n.name, "tier": n.tier, "role": n.role,
-                     "cpu": n.cpu, "memory": n.memory}
-                    for n in spec.expanded_nodes()
-                ],
+                "context": h.context,
+                "addr": h.addr or ("127.0.0.1" if h.context == "default" else ""),
+                # non-manager hosts default to root SSH on their context name
+                "ssh": h.ssh or ("" if h.context == "default"
+                                 else f"ssh://root@{h.context}"),
+                "nodes": bucket,
             }
+            for h, bucket in zip(hosts, buckets)
         ],
     }
 
