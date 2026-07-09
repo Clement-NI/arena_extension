@@ -194,9 +194,59 @@ class ScenarioSpec(BaseModel):
 class NextAction(BaseModel):
     """Classification of the user's answer after the summary."""
 
-    action: Literal["clean", "continue", "done"] = Field(
-        description="'clean' = tear the cluster down; 'continue' = the user wants "
-                    "another operation (new/changed scenario); 'done' = nothing else")
+    action: Literal["clean", "adjust", "done"] = Field(
+        description="'clean' = tear the cluster down; 'adjust' = the user describes "
+                    "a change to the network scenario (a node failed/recovered, a "
+                    "link degraded, reset to the initial network); 'done' = nothing else")
+
+
+# ---------------------------------------------------------------------------
+# Dynamic scenario: runtime chaos adjustments on the LIVE cluster
+# (the cluster itself never changes — only the injected network).
+# ---------------------------------------------------------------------------
+
+class ChaosPatch(BaseModel):
+    """One atomic change to the injected network."""
+
+    action: Literal["fail_node", "restore_node", "set_link",
+                    "set_region_pair", "reset_all"] = Field(
+        description="fail_node = cut a node off from everything (partition); "
+                    "restore_node = undo a fail_node; "
+                    "set_link = override one node-pair (latency/bw/loss/jitter); "
+                    "set_region_pair = override a tier pair, e.g. iot <-> cloud; "
+                    "reset_all = back to the initial network")
+    node: str = Field(default="", description="Node name for fail_node/restore_node, e.g. 'IoT-3'")
+    src: str = Field(default="", description="set_link: source node name e.g. 'Edge-1'; "
+                                             "set_region_pair: source region e.g. 'edge'")
+    dst: str = Field(default="", description="set_link: destination node name; "
+                                             "set_region_pair: destination region")
+    latency: str = Field(default="", description="e.g. '200ms' (empty = unchanged)")
+    bw: str = Field(default="", description="e.g. '10Mbit' (empty = unchanged)")
+    loss: str = Field(default="", description="e.g. '5' for 5% (empty = unchanged)")
+    jitter: str = Field(default="", description="e.g. '20ms' (empty = unchanged)")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_alternate_keys(cls, data):
+        """Same tolerance as LinkRule: models rename endpoint keys freely."""
+        if not isinstance(data, dict):
+            return data
+        for alt in ("source", "from", "from_region", "src_node"):
+            if "src" not in data and alt in data:
+                data["src"] = data.pop(alt)
+        for alt in ("destination", "target", "to", "to_region", "remote", "dst_node"):
+            if "dst" not in data and alt in data:
+                data["dst"] = data.pop(alt)
+        return data
+
+
+class DynamicScenario(BaseModel):
+    """LLM extraction result for one adjustment turn."""
+
+    question: str = Field(default="", description="Set ONLY when the request is unclear: "
+                                                  "ONE concise clarifying question")
+    patches: List[ChaosPatch] = Field(default_factory=list,
+                                      description="The changes the user asked for")
 
 
 # ---------------------------------------------------------------------------
@@ -230,8 +280,13 @@ class ArenaWorkflowState(MessagesState):
     chaos_apply_ok: Optional[bool]
     chaos_log: Optional[str]
 
-    # step 5 — post-summary decision (clean / continue / done)
+    # step 5 — post-summary decision (clean / adjust / done)
     next_action: Optional[str]
+
+    # step 5b — dynamic scenario (runtime chaos adjustments, looped)
+    active_exceptions: Optional[list]       # dynamic per-node-pair overrides
+    region_overrides: Optional[list]        # dynamic region-pair overrides
+    chaos_resource_names: Optional[list]    # applied resource names (for diff-delete)
 
     # step 6 — cluster teardown (script 3)
     clean_ok: Optional[bool]

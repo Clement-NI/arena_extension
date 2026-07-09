@@ -129,6 +129,50 @@ def generate_config_files(scenario: ScenarioSpec,
 
 
 @tool
+def patch_topology(topology_yaml_path: str,
+                   exceptions: Union[list, None] = None,
+                   region_pairs: Union[list, None] = None) -> str:
+    """Rewrite the DYNAMIC sections of an existing topology.yaml.
+
+    Used by the dynamic-scenario loop: the base topology (regions, defaults)
+    stays untouched; `exceptions` REPLACES the whole exceptions section (pass
+    [] to clear it, e.g. on reset), and each entry of `region_pairs` upserts
+    the matching from/to pair (same-pair override wins, new pairs appended).
+
+    Args:
+        topology_yaml_path: path to the topology.yaml to patch.
+        exceptions: full new exceptions list, entries like
+            {"from": "IoT-3", "to": "Edge-1", "partition": "true"} or
+            {"from": "Edge-1", "to": "Cloud-2", "latency": "200ms", "loss": "5"}.
+        region_pairs: region-pair overrides, entries like
+            {"from": "iot", "to": "cloud", "latency": "100ms"}.
+
+    Returns:
+        A confirmation string with the resulting section sizes.
+    """
+    p = Path(topology_yaml_path)
+    data = yaml.safe_load(p.read_text()) or {}
+
+    if exceptions is not None:
+        data["exceptions"] = exceptions
+
+    for ov in (region_pairs or []):
+        src, dst = str(ov.get("from", "")).lower(), str(ov.get("to", "")).lower()
+        pairs = data.setdefault("region_pairs", [])
+        for i, rp in enumerate(pairs):
+            a, b = str(rp.get("from", "")).lower(), str(rp.get("to", "")).lower()
+            if {a, b} == {src, dst}:
+                pairs[i] = ov
+                break
+        else:
+            pairs.append(ov)
+
+    p.write_text(yaml.safe_dump(data, sort_keys=False))
+    return (f"patched {p}: {len(data.get('exceptions', []))} exceptions, "
+            f"{len(data.get('region_pairs', []))} region_pairs")
+
+
+@tool
 def write_config_file(path: str, content: Union[str, dict, list]) -> str:
     """Write generated Arena configuration to disk.
 

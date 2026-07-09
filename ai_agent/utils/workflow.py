@@ -28,6 +28,7 @@ from ai_agent.utils.nodes import (
     after_validate,
     ask_next,
     clean_cluster,
+    dynamic_scenario,
     generate_chaos,
     generate_configs,
     launch_arena,
@@ -53,6 +54,7 @@ def build_workflow(model=None, checkpointer=None):
     g.add_node("generate_chaos", generate_chaos)
     g.add_node("summarize", summarize)
     g.add_node("ask_next", partial(ask_next, model=model))
+    g.add_node("dynamic_scenario", partial(dynamic_scenario, model=model))
     g.add_node("clean_cluster", clean_cluster)
     g.add_node("report_final", report_final)
 
@@ -73,7 +75,9 @@ def build_workflow(model=None, checkpointer=None):
                              "ask_next": "ask_next", END: END})
     g.add_conditional_edges("ask_next", after_ask,
                             {"clean_cluster": "clean_cluster",
-                             "read_scenario": "read_scenario", END: END})
+                             "dynamic_scenario": "dynamic_scenario", END: END})
+    # the adjust loop: apply the runtime change, then ask again until done
+    g.add_edge("dynamic_scenario", "ask_next")
     g.add_edge("clean_cluster", "report_final")
     g.add_edge("report_final", END)
 

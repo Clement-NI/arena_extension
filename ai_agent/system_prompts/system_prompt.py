@@ -154,3 +154,27 @@ The correct output is:
             "latency": "30ms", "bw": "200Mbit"}],
  "launch": true, "apply_chaos": true, "clean": false}
 """
+
+
+# Prompt for the dynamic-scenario node: turn one user sentence about a runtime
+# event into structured ChaosPatch objects. The cluster never changes here —
+# only the injected network.
+ADJUST_PROMPT = """\
+You translate ONE user message about a runtime network event in the Arena
+testbed into structured patches. The Kubernetes cluster itself never changes —
+only the injected network rules do.
+
+Patch actions:
+- fail_node:    a node broke / died / crashed -> {"action": "fail_node", "node": "IoT-3"}
+- restore_node: a failed node is back          -> {"action": "restore_node", "node": "IoT-3"}
+- set_link:     one node pair changes          -> {"action": "set_link", "src": "Edge-1",
+                 "dst": "Cloud-2", "latency": "200ms", "loss": "5"}
+- set_region_pair: a whole tier pair changes   -> {"action": "set_region_pair", "src": "iot",
+                 "dst": "cloud", "latency": "100ms"}
+- reset_all:    back to the initial network    -> {"action": "reset_all"}
+
+Node names look like IoT-3 / Edge-1 / Cloud-2; regions are lowercased tiers
+(iot / edge / cloud). Only fill the metric fields the user mentioned.
+If the request is unclear (which node? which pair?), return no patches and put
+ONE concise question in `question`. Do not invent changes the user did not ask.
+"""

@@ -25,10 +25,17 @@ holds the node functions and their routers:
             summarize         (report FIRST)
                 |-- spec.clean was asked upfront --> clean_cluster -> report_final -> END
                 v
-            ask_next          (interrupt(): "clean it, or something else?")
+            ask_next          (interrupt(): adjust the network / clean / done?)
+                |-- "adjust"   -> dynamic_scenario -> ask_next   (loop until done)
                 |-- "clean"    -> clean_cluster -> report_final -> END
-                |-- "continue" -> read_scenario  (answer becomes the next message)
                 '-- "done"     -> END
+
+            dynamic_scenario: runtime chaos adjustments on the LIVE cluster —
+            "IoT-3 failed" (partition), "edge-1 to cloud-2 200ms" (link
+            override), "iot <-> cloud 100ms" (region pair), "reset" (back to
+            the initial network). The cluster itself never changes here; the
+            dynamic layers are recompiled through the same tools and applied
+            with diff-delete + kubectl apply --server-side.
 
 Design rule: the LLM is used ONCE, in read_scenario, to extract a structured
 ScenarioSpec — the model never writes config text, so it cannot hallucinate
@@ -45,12 +52,13 @@ stub model.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
 
 from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
-from ai_agent.system_prompts.system_prompt import EXTRACT_PROMPT
+from ai_agent.system_prompts.system_prompt import ADJUST_PROMPT, EXTRACT_PROMPT
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.graph import END
 from langgraph.types import interrupt
@@ -64,7 +72,12 @@ from ai_agent.configurations.setting import (
     streaming,
     temperature,
 )
-from ai_agent.utils.states import ArenaWorkflowState, NextAction, ScenarioSpec
+from ai_agent.utils.states import (
+    ArenaWorkflowState,
+    DynamicScenario,
+    NextAction,
+    ScenarioSpec,
+)
 
 # The registered agent tools are the single generation/I-O layer for config
 # artifacts: the chatbot's LLM calls them via function-calling, the workflow
@@ -73,6 +86,7 @@ from ai_agent.utils.agent_tools.correction_tool import validate_topology
 from ai_agent.utils.agent_tools.generation_tool import (
     compile_topology,
     generate_config_files,
+    patch_topology,
     write_config_file,
 )
 
@@ -266,7 +280,9 @@ def generate_chaos(state: ArenaWorkflowState) -> dict:
     chaos_path = OUT_DIR / "chaos.yaml"
     write_config_file.invoke({"path": str(chaos_path), "content": chaos_text})
 
-    result = {"chaos_yaml_path": str(chaos_path)}
+    # remember the applied resource names so dynamic_scenario can diff-delete
+    result = {"chaos_yaml_path": str(chaos_path),
+              "chaos_resource_names": sorted(_chaos_names(chaos_text))}
     if spec.apply_chaos and state.get("launch_ok"):
         try:
             # All NetworkChaos resources live in the arena-net namespace (see
@@ -344,14 +360,16 @@ def after_summarize(state: ArenaWorkflowState) -> str:
 
 def ask_next(state: ArenaWorkflowState, model=None) -> dict:
     answer = str(interrupt(
-        "The workflow finished (summary above). Should I clean the cluster "
-        "(tear it down), or would you like to do something else?"
+        "Anything else? You can describe a runtime event to adjust the injected "
+        "network (e.g. 'IoT-3 failed', 'edge-1 to cloud-2 now 200ms', 'reset'), "
+        "say 'clean' to tear the cluster down, or 'done' to finish."
     ))
     try:
         verdict: NextAction = _get_llm(model).with_structured_output(NextAction).invoke(
             [SystemMessage("Classify the user's reply after an Arena testbed run. "
-                           "'clean' = tear the cluster down now; 'continue' = they want "
-                           "another operation or a changed scenario; 'done' = nothing else."),
+                           "'clean' = tear the cluster down now; 'adjust' = they describe "
+                           "a change to the network scenario (a node failed or recovered, "
+                           "a link degraded, reset the network); 'done' = nothing else."),
              HumanMessage(answer)]
         )
         action = verdict.action
@@ -362,11 +380,11 @@ def ask_next(state: ArenaWorkflowState, model=None) -> dict:
         elif any(k in low for k in ("no", "done", "nothing", "stop", "不用", "没有")):
             action = "done"
         else:
-            action = "continue"
+            action = "adjust"
 
     out = {"next_action": action}
-    if action == "continue":
-        # feed the answer back into the conversation so read_scenario sees it
+    if action == "adjust":
+        # keep the event description in the conversation for dynamic_scenario
         out["messages"] = [HumanMessage(content=answer)]
     elif action == "done":
         out["messages"] = [AIMessage(content="OK — leaving everything as it is. Bye!")]
@@ -375,8 +393,145 @@ def ask_next(state: ArenaWorkflowState, model=None) -> dict:
 
 def after_ask(state: ArenaWorkflowState) -> str:
     return {"clean": "clean_cluster",
-            "continue": "read_scenario",
+            "adjust": "dynamic_scenario",
             "done": END}[state.get("next_action") or "done"]
+
+
+# ---------------------------------------------------------------------------
+# 5c. dynamic scenario — adjust the injected network on the LIVE cluster,
+#     looping back to ask_next until the user is done. The cluster itself
+#     never changes here; only exceptions / region-pair overrides do.
+# ---------------------------------------------------------------------------
+
+def _chaos_names(chaos_text: str) -> set:
+    """Resource names in a chaosmesh manifest (for diff-deleting on re-apply)."""
+    return set(re.findall(r"^\s*name: (\S+)$", chaos_text, re.M))
+
+
+def _testbed_workers(state: ArenaWorkflowState) -> list:
+    """Worker node names from the generated nodes.json (for fail_node expansion)."""
+    data = json.loads(Path(state["nodes_json_path"]).read_text())
+    return [n["name"] for h in data.get("hosts", []) for n in h.get("nodes", [])
+            if n.get("role") == "worker"]
+
+
+def _apply_patches(patches, exceptions: list, overrides: list, workers: list) -> str:
+    """Fold ChaosPatch objects into the dynamic layers (pure function).
+    Returns a short human-readable summary of what changed."""
+    notes = []
+    for p in patches:
+        if p.action == "reset_all":
+            exceptions.clear()
+            overrides.clear()
+            notes.append("reset to the initial network")
+        elif p.action == "fail_node":
+            exceptions[:] = [e for e in exceptions
+                             if p.node not in (e.get("from"), e.get("to"))]
+            exceptions.extend({"from": p.node, "to": w, "partition": "true",
+                               "comment": "dynamic: node failure"}
+                              for w in workers if w != p.node)
+            notes.append(f"{p.node} partitioned from all nodes")
+        elif p.action == "restore_node":
+            before = len(exceptions)
+            exceptions[:] = [e for e in exceptions
+                             if p.node not in (e.get("from"), e.get("to"))]
+            notes.append(f"{p.node} restored ({before - len(exceptions)} rules removed)")
+        elif p.action == "set_link":
+            exceptions[:] = [e for e in exceptions
+                             if {e.get("from"), e.get("to")} != {p.src, p.dst}]
+            entry = {"from": p.src, "to": p.dst, "comment": "dynamic: link override"}
+            for k in ("latency", "bw", "loss", "jitter"):
+                if getattr(p, k):
+                    entry[k] = getattr(p, k)
+            exceptions.append(entry)
+            notes.append(f"link {p.src} <-> {p.dst} overridden")
+        elif p.action == "set_region_pair":
+            overrides[:] = [o for o in overrides
+                            if {o.get("from"), o.get("to")} != {p.src.lower(), p.dst.lower()}]
+            entry = {"from": p.src.lower(), "to": p.dst.lower()}
+            for k in ("latency", "bw", "loss", "jitter"):
+                if getattr(p, k):
+                    entry[k] = getattr(p, k)
+            overrides.append(entry)
+            notes.append(f"region pair {p.src} <-> {p.dst} overridden")
+    return "; ".join(notes)
+
+
+def dynamic_scenario(state: ArenaWorkflowState, model=None) -> dict:
+    event = next((m.content for m in reversed(state["messages"])
+                  if getattr(m, "type", "") == "human"), "")
+    workers = _testbed_workers(state)
+
+    # 1. one small LLM call: sentence -> patches
+    try:
+        parsed: DynamicScenario = _get_llm(model).with_structured_output(DynamicScenario).invoke(
+            [SystemMessage(ADJUST_PROMPT +
+                           f"\nKnown worker nodes ({len(workers)}): "
+                           f"{', '.join(workers[:40])}{'...' if len(workers) > 40 else ''}"),
+             HumanMessage(event)]
+        )
+    except Exception as e:
+        return {"messages": [AIMessage(content=
+            f"I couldn't parse that adjustment ({type(e).__name__}). Try e.g. "
+            "'IoT-3 failed' or 'edge-1 to cloud-2: 200ms, 5% loss'.")]}
+    if not parsed.patches:
+        q = parsed.question or ("Which node or link should change? E.g. "
+                                "'IoT-3 failed' or 'iot <-> cloud now 100ms'.")
+        return {"messages": [AIMessage(content=q)]}
+
+    # 2. fold the patches into the dynamic layers (work on copies: only commit
+    #    when validation passes)
+    exceptions = list(state.get("active_exceptions") or [])
+    overrides = list(state.get("region_overrides") or [])
+    changed = _apply_patches(parsed.patches, exceptions, overrides, workers)
+
+    # 3. rewrite topology.yaml, validate, recompile
+    patch_topology.invoke({"topology_yaml_path": state["topology_yaml_path"],
+                           "exceptions": exceptions, "region_pairs": overrides})
+    verdict = validate_topology.invoke({"topology_yaml_path": state["topology_yaml_path"],
+                                        "nodes_json_path": state["nodes_json_path"]})
+    if not verdict.startswith("OK"):
+        # roll the file back to the last committed dynamic layers
+        patch_topology.invoke({"topology_yaml_path": state["topology_yaml_path"],
+                               "exceptions": list(state.get("active_exceptions") or []),
+                               "region_pairs": list(state.get("region_overrides") or [])})
+        return {"messages": [AIMessage(content=f"That change is invalid: {verdict}\n"
+                                               "Nothing was applied — please rephrase.")]}
+
+    chaos_text = compile_topology.invoke({"topology_yaml_path": state["topology_yaml_path"],
+                                          "nodes_json_path": state["nodes_json_path"],
+                                          "fmt": "chaosmesh"})
+    if chaos_text.startswith("ERROR:"):
+        return {"messages": [AIMessage(content=f"Recompile failed: {chaos_text[:300]}")]}
+    chaos_path = OUT_DIR / "chaos.yaml"
+    write_config_file.invoke({"path": str(chaos_path), "content": chaos_text})
+
+    # 4. diff + apply on the live cluster (kubectl apply never deletes, so
+    #    resources that disappeared — e.g. on restore/reset — need explicit rm)
+    new_names = _chaos_names(chaos_text)
+    old_names = set(state.get("chaos_resource_names") or [])
+    gone = sorted(old_names - new_names)
+    apply_note = "cluster not launched — rules written to chaos.yaml only"
+    if state.get("launch_ok"):
+        try:
+            for i in range(0, len(gone), 200):
+                subprocess.run(["kubectl", "delete", "networkchaos", "-n", "arena-net",
+                                "--ignore-not-found", *gone[i:i + 200]],
+                               capture_output=True, text=True, timeout=600)
+            n_res = len(new_names)
+            r = subprocess.run(["kubectl", "apply", "--server-side", "-f", str(chaos_path)],
+                               capture_output=True, text=True,
+                               timeout=min(3600, 300 + n_res // 2))
+            apply_note = (f"applied OK ({n_res} rules, {len(gone)} removed)"
+                          if r.returncode == 0 else
+                          f"apply FAILED: {_tail(r.stdout + r.stderr, 300)}")
+        except Exception as e:
+            apply_note = f"kubectl failed: {e}"
+
+    return {"active_exceptions": exceptions,
+            "region_overrides": overrides,
+            "chaos_resource_names": sorted(new_names),
+            "messages": [AIMessage(content=f"Adjustment done: {changed}.\n{apply_note}")]}
 
 
 # ---------------------------------------------------------------------------
