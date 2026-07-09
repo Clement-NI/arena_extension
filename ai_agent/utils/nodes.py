@@ -408,6 +408,18 @@ def _chaos_names(chaos_text: str) -> set:
     return set(re.findall(r"^\s*name: (\S+)$", chaos_text, re.M))
 
 
+def _chaos_docs(chaos_text: str) -> dict:
+    """Split a multi-doc chaosmesh manifest into {resource_name: doc_text}."""
+    docs = {}
+    for chunk in re.split(r"^---\s*$", chaos_text, flags=re.M):
+        if not chunk.strip():
+            continue
+        m = re.search(r"^\s*name: (\S+)$", chunk, re.M)
+        if m:
+            docs[m.group(1)] = chunk.strip()
+    return docs
+
+
 def _testbed_workers(state: ArenaWorkflowState) -> list:
     """Worker node names from the generated nodes.json (for fail_node expansion)."""
     data = json.loads(Path(state["nodes_json_path"]).read_text())
@@ -503,14 +515,21 @@ def dynamic_scenario(state: ArenaWorkflowState, model=None) -> dict:
                                           "fmt": "chaosmesh"})
     if chaos_text.startswith("ERROR:"):
         return {"messages": [AIMessage(content=f"Recompile failed: {chaos_text[:300]}")]}
+
+    # 4. per-resource delta: only the rules whose content actually changed are
+    #    sent to the cluster — NOT the whole manifest (at 100 nodes that would
+    #    re-submit ~10k resources for a single-link tweak). Vanished resources
+    #    (restore/reset) still need explicit deletion: apply never deletes.
     chaos_path = OUT_DIR / "chaos.yaml"
+    old_docs = (_chaos_docs(chaos_path.read_text())
+                if chaos_path.exists() else {})
     write_config_file.invoke({"path": str(chaos_path), "content": chaos_text})
 
-    # 4. diff + apply on the live cluster (kubectl apply never deletes, so
-    #    resources that disappeared — e.g. on restore/reset — need explicit rm)
-    new_names = _chaos_names(chaos_text)
-    old_names = set(state.get("chaos_resource_names") or [])
-    gone = sorted(old_names - new_names)
+    new_docs = _chaos_docs(chaos_text)
+    delta = {name: doc for name, doc in new_docs.items()
+             if old_docs.get(name) != doc}
+    gone = sorted(set(old_docs) - set(new_docs))
+
     apply_note = "cluster not launched — rules written to chaos.yaml only"
     if state.get("launch_ok"):
         try:
@@ -518,19 +537,26 @@ def dynamic_scenario(state: ArenaWorkflowState, model=None) -> dict:
                 subprocess.run(["kubectl", "delete", "networkchaos", "-n", "arena-net",
                                 "--ignore-not-found", *gone[i:i + 200]],
                                capture_output=True, text=True, timeout=600)
-            n_res = len(new_names)
-            r = subprocess.run(["kubectl", "apply", "--server-side", "-f", str(chaos_path)],
-                               capture_output=True, text=True,
-                               timeout=min(3600, 300 + n_res // 2))
-            apply_note = (f"applied OK ({n_res} rules, {len(gone)} removed)"
-                          if r.returncode == 0 else
-                          f"apply FAILED: {_tail(r.stdout + r.stderr, 300)}")
+            if delta:
+                delta_path = OUT_DIR / "chaos-delta.yaml"
+                delta_path.write_text("---\n" + "\n---\n".join(delta.values()) + "\n")
+                r = subprocess.run(
+                    ["kubectl", "apply", "--server-side", "-f", str(delta_path)],
+                    capture_output=True, text=True,
+                    timeout=min(3600, 300 + len(delta) // 2))
+                apply_note = (f"applied delta OK ({len(delta)} changed/new, "
+                              f"{len(gone)} removed, {len(new_docs)} total)"
+                              if r.returncode == 0 else
+                              f"delta apply FAILED: {_tail(r.stdout + r.stderr, 300)}")
+            else:
+                apply_note = (f"no rule content changed "
+                              f"({len(gone)} removed, {len(new_docs)} total)")
         except Exception as e:
             apply_note = f"kubectl failed: {e}"
 
     return {"active_exceptions": exceptions,
             "region_overrides": overrides,
-            "chaos_resource_names": sorted(new_names),
+            "chaos_resource_names": sorted(new_docs),
             "messages": [AIMessage(content=f"Adjustment done: {changed}.\n{apply_note}")]}
 
 
