@@ -275,12 +275,19 @@ def generate_chaos(state: ArenaWorkflowState) -> dict:
 
             subprocess.run(["kubectl", "create", "namespace", "arena-net"],
                                capture_output=True, text=True, timeout=60)
+            # kubectl submits the resources one by one; big clusters emit
+            # thousands (N workers -> N*(N-1) NetworkChaos), so scale the
+            # timeout with the resource count instead of a fixed 120s.
+            # --server-side is faster and avoids huge last-applied annotations.
+            n_res = chaos_text.count("kind: NetworkChaos")
+            apply_timeout = min(3600, 300 + n_res // 2)
             r = subprocess.run(
-                ["kubectl", "apply", "-f", str(chaos_path)],
-                capture_output=True, text=True, timeout=120,
+                ["kubectl", "apply", "--server-side", "-f", str(chaos_path)],
+                capture_output=True, text=True, timeout=apply_timeout,
             )
             result["chaos_apply_ok"] = r.returncode == 0
-            result["chaos_log"] = _tail(r.stdout + r.stderr)
+            result["chaos_log"] = (f"[{n_res} NetworkChaos, timeout {apply_timeout}s] "
+                                   f"{_tail(r.stdout + r.stderr)}")
         except Exception as e:
             result["chaos_apply_ok"] = False
             result["chaos_log"] = f"kubectl failed: {e}"
