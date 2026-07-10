@@ -200,7 +200,7 @@ def validate_configs(state: ArenaWorkflowState) -> dict:
                 "generation_retries": state.get("generation_retries", 0) + 1}
 
     # extra guard the tool doesn't cover: exactly one control-plane node
-    data = json.loads(Path(state["nodes_json_path"]).read_text())
+    data = json.loads(Path(state["nodes_json_path"]).read_text(encoding="utf-8"))
     cps = [n for h in data.get("hosts", []) for n in h.get("nodes", [])
            if n.get("role") == "control-plane"]
     if len(cps) != 1:
@@ -230,7 +230,7 @@ def publish_configs(state: ArenaWorkflowState) -> dict:
     the validated config is published there through write_config_file — even
     when launch is skipped, the user can then run the scripts manually.
     """
-    content = Path(state["nodes_json_path"]).read_text()
+    content = Path(state["nodes_json_path"]).read_text(encoding="utf-8")
     result = write_config_file.invoke({"path": str(TESTBED_DIR / "nodes.json"),
                                        "content": content})
     return {"publish_log": result}
@@ -422,7 +422,7 @@ def _chaos_docs(chaos_text: str) -> dict:
 
 def _testbed_workers(state: ArenaWorkflowState) -> list:
     """Worker node names from the generated nodes.json (for fail_node expansion)."""
-    data = json.loads(Path(state["nodes_json_path"]).read_text())
+    data = json.loads(Path(state["nodes_json_path"]).read_text(encoding="utf-8"))
     return [n["name"] for h in data.get("hosts", []) for n in h.get("nodes", [])
             if n.get("role") == "worker"]
 
@@ -521,7 +521,7 @@ def dynamic_scenario(state: ArenaWorkflowState, model=None) -> dict:
     #    re-submit ~10k resources for a single-link tweak). Vanished resources
     #    (restore/reset) still need explicit deletion: apply never deletes.
     chaos_path = OUT_DIR / "chaos.yaml"
-    old_docs = (_chaos_docs(chaos_path.read_text())
+    old_docs = (_chaos_docs(chaos_path.read_text(encoding="utf-8"))
                 if chaos_path.exists() else {})
     write_config_file.invoke({"path": str(chaos_path), "content": chaos_text})
 
@@ -539,7 +539,7 @@ def dynamic_scenario(state: ArenaWorkflowState, model=None) -> dict:
                                capture_output=True, text=True, timeout=600)
             if delta:
                 delta_path = OUT_DIR / "chaos-delta.yaml"
-                delta_path.write_text("---\n" + "\n---\n".join(delta.values()) + "\n")
+                delta_path.write_text("---\n" + "\n---\n".join(delta.values()) + "\n", encoding="utf-8")
                 r = subprocess.run(
                     ["kubectl", "apply", "--server-side", "-f", str(delta_path)],
                     capture_output=True, text=True,
@@ -578,7 +578,7 @@ def _worker_hosts(state: ArenaWorkflowState) -> list:
     except Exception:
         pass
     try:
-        data = json.loads((TESTBED_DIR / "nodes.json").read_text())
+        data = json.loads((TESTBED_DIR / "nodes.json").read_text(encoding="utf-8"))
         return [h.get("context") for h in data.get("hosts", [])
                 if h.get("context") and h.get("context") != "default"]
     except Exception:

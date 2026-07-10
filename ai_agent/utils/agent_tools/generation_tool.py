@@ -98,7 +98,7 @@ def _write(path: str, content: Union[str, dict, list]) -> str:
             content = json.dumps(content, indent=2)
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(content)
+    p.write_text(content, encoding="utf-8")
     return f"wrote {p} ({len(content)} bytes)"
 
 
@@ -151,7 +151,7 @@ def patch_topology(topology_yaml_path: str,
         A confirmation string with the resulting section sizes.
     """
     p = Path(topology_yaml_path)
-    data = yaml.safe_load(p.read_text()) or {}
+    data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
 
     if exceptions is not None:
         data["exceptions"] = exceptions
@@ -167,7 +167,7 @@ def patch_topology(topology_yaml_path: str,
         else:
             pairs.append(ov)
 
-    p.write_text(yaml.safe_dump(data, sort_keys=False))
+    p.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
     return (f"patched {p}: {len(data.get('exceptions', []))} exceptions, "
             f"{len(data.get('region_pairs', []))} region_pairs")
 

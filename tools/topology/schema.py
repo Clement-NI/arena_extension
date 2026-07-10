@@ -37,7 +37,7 @@ def load_nodes_from_arena(nodes_json_path: Path) -> Dict[str, Node]:
     Each entry in hosts[].nodes[] becomes a Node with the same dual-label
     scheme that 1-launch_cluster.sh emits (arena.tier + arena.node).
     """
-    data = json.loads(nodes_json_path.read_text())
+    data = json.loads(nodes_json_path.read_text(encoding="utf-8"))
     hosts = data.get("hosts") or []
     out: Dict[str, Node] = {}
     for h_idx, h in enumerate(hosts):
@@ -176,7 +176,7 @@ def _load_exceptions(obj: Any, known_nodes: set) -> List[Exception_]:
 def load_topology(topo_yaml: Path, nodes_json: Path) -> Topology:
     """Build a Topology from a topology.yaml + arena nodes.json."""
     nodes = load_nodes_from_arena(nodes_json)
-    raw = yaml.safe_load(topo_yaml.read_text()) or {}
+    raw = yaml.safe_load(topo_yaml.read_text(encoding="utf-8")) or {}
     if not isinstance(raw, dict):
         raise ValueError(f"{topo_yaml}: must be a YAML mapping at the top level")
 
