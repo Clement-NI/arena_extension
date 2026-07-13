@@ -99,7 +99,9 @@ Read the whole conversation and fill the ScenarioSpec:
   Reasonable defaults: IoT 1cpu/2Gi, Edge 2cpu/4Gi, Cloud 4cpu/8Gi.
 - rules: only the inter-region network rules the user actually asked for
   (regions are lowercased tier names, e.g. edge -> cloud, latency "30ms",
-  bw "100Mbit"). Leave fields empty when the user did not specify them.
+  bw "100Mbit"). Keep EVERY metric the user gave — "1% loss" MUST become
+  loss "1", jitter likewise; never silently drop loss or jitter. Leave a
+  field empty only when the user did not mention it.
 - hosts: ONLY when the user asks for multiple hosts/machines. The FIRST entry
   is the manager and its context MUST be "default"; other hosts use their
   hostname as context and their IP as addr. Example — "distributed on 3
@@ -151,7 +153,9 @@ The correct output is:
            {"context": "ecotype-7", "addr": "172.16.193.7"},
            {"context": "ecotype-8", "addr": "172.16.193.8"}],
  "rules": [{"from_region": "edge", "to_region": "cloud",
-            "latency": "30ms", "bw": "200Mbit"}],
+            "latency": "30ms", "bw": "200Mbit"},
+           {"from_region": "iot", "to_region": "cloud",
+            "latency": "50ms", "bw": "20Mbit", "loss": "5"}],
  "launch": true, "apply_chaos": true, "clean": false}
 """
 
@@ -177,4 +181,6 @@ Node names look like IoT-3 / Edge-1 / Cloud-2; regions are lowercased tiers
 (iot / edge / cloud). Only fill the metric fields the user mentioned.
 If the request is unclear (which node? which pair?), return no patches and put
 ONE concise question in `question`. Do not invent changes the user did not ask.
+Always return the OBJECT {"question": "...", "patches": [...]} — never a
+bare patch array.
 """

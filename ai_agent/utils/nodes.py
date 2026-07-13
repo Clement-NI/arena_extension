@@ -529,13 +529,18 @@ def dynamic_scenario(state: ArenaWorkflowState, model=None) -> dict:
     delta = {name: doc for name, doc in new_docs.items()
              if old_docs.get(name) != doc}
     gone = sorted(set(old_docs) - set(new_docs))
+    # Chaos Mesh's validating webhook (vnetworkchaos.kb.io) REJECTS updates to
+    # an existing chaos spec, so changed-but-still-present resources must be
+    # deleted first and recreated by the apply below — only brand-new names
+    # can be applied directly.
+    to_delete = sorted(set(gone) | (set(delta) & set(old_docs)))
 
     apply_note = "cluster not launched — rules written to chaos.yaml only"
     if state.get("launch_ok"):
         try:
-            for i in range(0, len(gone), 200):
+            for i in range(0, len(to_delete), 200):
                 subprocess.run(["kubectl", "delete", "networkchaos", "-n", "arena-net",
-                                "--ignore-not-found", *gone[i:i + 200]],
+                                "--ignore-not-found", *to_delete[i:i + 200]],
                                capture_output=True, text=True, timeout=600)
             if delta:
                 delta_path = OUT_DIR / "chaos-delta.yaml"

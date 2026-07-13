@@ -248,6 +248,17 @@ class DynamicScenario(BaseModel):
     patches: List[ChaosPatch] = Field(default_factory=list,
                                       description="The changes the user asked for")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_bare_patch_list(cls, data):
+        """Weak models (observed with nemotron) sometimes emit a bare
+        [{...patch...}] array instead of the wrapping object — accept it."""
+        if isinstance(data, list):
+            return {"patches": data}
+        if isinstance(data, dict) and "patches" not in data and "action" in data:
+            return {"patches": [data]}     # single bare patch object
+        return data
+
 
 # ---------------------------------------------------------------------------
 # Graph state
