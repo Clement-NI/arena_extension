@@ -125,6 +125,8 @@ question in `question`. Do not invent what the user did not say.
 complete=true is ONLY valid when tier_groups or nodes is non-empty — a spec
 with both lists empty is never complete.
 
+Example 0 - user says :" read the (arena) cluster. " Then you just skip to "read_cluster".
+
 Example 1 (single host) — user says: "I wanna a cluster with 10 nodes. 3 IoT,
 3 Edge and 4 Cloud, one Cloud is itself control plane, in one single host.
 Just the nodes." The correct output is:
