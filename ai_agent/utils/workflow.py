@@ -69,8 +69,10 @@ def build_workflow(model=None, checkpointer=None):
     g.add_conditional_edges("route_entry", after_entry,
                             {"read_scenario": "read_scenario",
                              "read_cluster": "read_cluster"})
+    # fallback: "existing" was asked but no testbed files exist -> build one
     g.add_conditional_edges("read_cluster", after_read_cluster,
-                            {"ask_next": "ask_next"})
+                            {"ask_next": "ask_next",
+                             "read_scenario": "read_scenario"})
     g.add_conditional_edges("read_scenario", after_read,
                             {"generate_configs": "generate_configs", END: END})
     g.add_edge("generate_configs", "validate_configs")
