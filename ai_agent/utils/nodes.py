@@ -142,27 +142,35 @@ def _tail(text: str, n: int = 1500) -> str:
 # ---------------------------------------------------------------------------
 
 _EXISTING_KEYWORDS = ("existing", "already", "attach", "running cluster",
-                      "current cluster", "已有", "现有", "已经")
+                      "current cluster", "read the cluster", "read cluster",
+                      "read the arena", "read arena", "inspect", "connect to",
+                      "use the cluster", "已有", "现有", "已经", "读取", "查看")
 
 
 def route_entry(state: ArenaWorkflowState, model=None) -> dict:
     first = next((m.content for m in state["messages"]
                   if getattr(m, "type", "") == "human"), "")
-    try:
-        verdict: EntryDecision = _get_llm(model).with_structured_output(EntryDecision).invoke(
-            [SystemMessage("Decide how to route the user's FIRST message about the "
-                           "Arena testbed. 'new' = they describe a cluster to build "
-                           "(node counts, tiers, network rules, launch...). "
-                           "'existing' = they want to work with an already-running "
-                           "Arena cluster (adjust its network, inspect it, clean it). "
-                           "'unclear' = cannot tell."),
-             HumanMessage(first)])
-        mode = verdict.mode
-    except Exception:
-        low = first.lower()
-        mode = ("existing" if any(k in low for k in _EXISTING_KEYWORDS)
-                else "new" if any(k in low for k in ("cluster", "node", "iot", "edge", "cloud"))
-                else "unclear")
+    low = first.lower()
+
+    # deterministic strong signals first — don't let a weak model overrule an
+    # explicit "read/attach to the existing cluster"
+    if any(k in low for k in _EXISTING_KEYWORDS):
+        mode = "existing"
+    else:
+        try:
+            verdict: EntryDecision = _get_llm(model).with_structured_output(EntryDecision).invoke(
+                [SystemMessage("Decide how to route the user's FIRST message about the "
+                               "Arena testbed. 'new' = they describe a cluster to build "
+                               "(node counts, tiers, network rules, launch...). "
+                               "'existing' = they want to work with an already-running "
+                               "Arena cluster — read/inspect it, adjust its network, "
+                               "clean it (e.g. 'read the arena cluster', 'attach to my "
+                               "cluster', 'IoT-3 failed'). 'unclear' = cannot tell."),
+                 HumanMessage(first)])
+            mode = verdict.mode
+        except Exception:
+            mode = ("new" if any(k in low for k in ("cluster", "node", "iot", "edge", "cloud"))
+                    else "unclear")
 
     if mode == "unclear":
         answer = str(interrupt(
@@ -541,6 +549,37 @@ def _testbed_workers(state: ArenaWorkflowState) -> list:
             if n.get("role") == "worker"]
 
 
+def _canonicalize_patches(patches, node_names: list) -> list:
+    """Fix the spelling of node names in extracted patches.
+
+    Users (and models copying them) write 'Iot-2' or 'iot-2' for the node the
+    testbed calls 'IoT-2'; match case-insensitively against the real node list
+    and return the names that could NOT be resolved (regions like 'iot' are
+    left alone — they are not node names).
+    """
+    canon = {n.lower(): n for n in node_names}
+    regions = {n.rsplit("-", 1)[0].lower() for n in node_names}
+    unknown = []
+    for p in patches:
+        node_fields = (("node",) if p.action in ("fail_node", "restore_node")
+                       else ("src", "dst") if p.action == "set_link" else ())
+        for f in node_fields:
+            v = (getattr(p, f, None) or "").strip()
+            if not v:
+                continue
+            fixed = canon.get(v.lower())
+            if fixed:
+                setattr(p, f, fixed)
+            else:
+                unknown.append(v)
+        if p.action == "set_region_pair":
+            for f in ("src", "dst"):
+                v = (getattr(p, f, None) or "").strip().lower()
+                if v and v not in regions:
+                    unknown.append(v)
+    return unknown
+
+
 def _apply_patches(patches, exceptions: list, overrides: list, workers: list) -> str:
     """Fold ChaosPatch objects into the dynamic layers (pure function).
     Returns a short human-readable summary of what changed."""
@@ -604,6 +643,15 @@ def dynamic_scenario(state: ArenaWorkflowState, model=None) -> dict:
         q = parsed.question or ("Which node or link should change? E.g. "
                                 "'IoT-3 failed' or 'iot <-> cloud now 100ms'.")
         return {"messages": [AIMessage(content=q)]}
+
+    # 1b. tolerate case/spelling drift in node names ('Iot-2' -> 'IoT-2');
+    #     refuse cleanly if a name matches nothing instead of failing later
+    unknown = _canonicalize_patches(parsed.patches, workers)
+    if unknown:
+        return {"messages": [AIMessage(content=
+            f"I don't know the node(s) {', '.join(sorted(set(unknown)))}. "
+            f"Known nodes: {', '.join(workers[:40])}"
+            f"{'...' if len(workers) > 40 else ''}. Please rephrase.")]}
 
     # 2. fold the patches into the dynamic layers (work on copies: only commit
     #    when validation passes)

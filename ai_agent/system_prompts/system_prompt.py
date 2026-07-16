@@ -180,7 +180,9 @@ Patch actions:
 - reset_all:    back to the initial network    -> {"action": "reset_all"}
 
 Node names look like IoT-3 / Edge-1 / Cloud-2; regions are lowercased tiers
-(iot / edge / cloud). Only fill the metric fields the user mentioned.
+(iot / edge / cloud). Users often get the case wrong — "Iot-2" or "iot-2"
+means the known node "IoT-2"; always copy the name EXACTLY as it appears in
+the known worker list. Only fill the metric fields the user mentioned.
 If the request is unclear (which node? which pair?), return no patches and put
 ONE concise question in `question`. Do not invent changes the user did not ask.
 Always return the OBJECT {"question": "...", "patches": [...]} — never a
