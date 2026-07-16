@@ -2,3 +2,10 @@ __pycache__/
 *.pyc
 *.pyo
 arena_testbed/kind-cluster-config.json
+
+# Secrets — never commit real keys
+.env
+ai_agent/.env
+
+# Agent-generated config output (regenerated on demand)
+ai_agent/out/

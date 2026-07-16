@@ -53,7 +53,7 @@ def cmd_compile(args):
     else:
         sys.exit(f"error: unknown format {fmt}")
     if args.output:
-        Path(args.output).write_text(out)
+        Path(args.output).write_text(out, encoding="utf-8")
         print(f"wrote {args.output}", file=sys.stderr)
     else:
         print(out, end="")
