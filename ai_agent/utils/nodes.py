@@ -4,7 +4,10 @@ LangGraph nodes for the Arena orchestration workflow.
 The graph itself is assembled in ai_agent/utils/workflow.py; this module only
 holds the node functions and their routers:
 
-    START -> read_scenario --(missing info: ask user)--> END (graph pauses)
+    START -> route_entry --("existing")--> read_cluster --> ask_next
+                |  (unclear: interrupt "new or existing?")      (adjust loop)
+                v ("new")
+            read_scenario --(missing info: ask user)--> END (graph pauses)
                 |
                 v (spec complete)
             generate_configs  (deterministic: spec -> nodes.json + topology.yaml)
@@ -56,6 +59,7 @@ import re
 import subprocess
 from pathlib import Path
 
+import yaml
 from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
 from ai_agent.system_prompts.system_prompt import ADJUST_PROMPT, EXTRACT_PROMPT
@@ -75,6 +79,7 @@ from ai_agent.configurations.setting import (
 from ai_agent.utils.states import (
     ArenaWorkflowState,
     DynamicScenario,
+    EntryDecision,
     NextAction,
     ScenarioSpec,
 )
@@ -130,6 +135,115 @@ def _get_llm(model=None):
 
 def _tail(text: str, n: int = 1500) -> str:
     return text[-n:] if text and len(text) > n else (text or "")
+
+
+# ---------------------------------------------------------------------------
+# 0. entry routing: build a NEW testbed, or attach to the EXISTING one
+# ---------------------------------------------------------------------------
+
+_EXISTING_KEYWORDS = ("existing", "already", "attach", "running cluster",
+                      "current cluster", "已有", "现有", "已经")
+
+
+def route_entry(state: ArenaWorkflowState, model=None) -> dict:
+    first = next((m.content for m in state["messages"]
+                  if getattr(m, "type", "") == "human"), "")
+    try:
+        verdict: EntryDecision = _get_llm(model).with_structured_output(EntryDecision).invoke(
+            [SystemMessage("Decide how to route the user's FIRST message about the "
+                           "Arena testbed. 'new' = they describe a cluster to build "
+                           "(node counts, tiers, network rules, launch...). "
+                           "'existing' = they want to work with an already-running "
+                           "Arena cluster (adjust its network, inspect it, clean it). "
+                           "'unclear' = cannot tell."),
+             HumanMessage(first)])
+        mode = verdict.mode
+    except Exception:
+        low = first.lower()
+        mode = ("existing" if any(k in low for k in _EXISTING_KEYWORDS)
+                else "new" if any(k in low for k in ("cluster", "node", "iot", "edge", "cloud"))
+                else "unclear")
+
+    if mode == "unclear":
+        answer = str(interrupt(
+            "Do you want to CREATE a new Arena cluster, or use the EXISTING one "
+            "(adjust its network / clean it)? Answer 'new' or 'existing'."))
+        low = answer.lower()
+        mode = "existing" if any(k in low for k in _EXISTING_KEYWORDS + ("exist",)) else "new"
+    return {"entry_mode": mode}
+
+
+def after_entry(state: ArenaWorkflowState) -> str:
+    return "read_cluster" if state.get("entry_mode") == "existing" else "read_scenario"
+
+
+def read_cluster(state: ArenaWorkflowState) -> dict:
+    """Attach to an existing Arena testbed: recover the generated artifacts,
+    probe the live cluster, and rebuild enough state for the adjust loop."""
+    nodes_path = OUT_DIR / "nodes.json"
+    topo_path = OUT_DIR / "topology.yaml"
+    if not (nodes_path.exists() and topo_path.exists()):
+        return {"cluster_found": False, "messages": [AIMessage(content=
+            "I couldn't find an existing testbed configuration "
+            f"({nodes_path} / topology.yaml missing). Please describe the "
+            "cluster you want to create instead.")]}
+
+    data = json.loads(nodes_path.read_text(encoding="utf-8"))
+    all_nodes = [n for h in data.get("hosts", []) for n in h.get("nodes", [])]
+    hosts = [{"context": h.get("context", ""), "addr": h.get("addr", "")}
+             for h in data.get("hosts", [])]
+    scenario = ScenarioSpec(
+        complete=True, cluster_name=data.get("cluster_name", "arena-testbed"),
+        nodes=all_nodes, hosts=hosts if len(hosts) > 1 else [],
+    ).model_dump()
+
+    # dynamic layer persisted in the topology's exceptions section
+    topo = yaml.safe_load(topo_path.read_text(encoding="utf-8")) or {}
+    active_exceptions = topo.get("exceptions") or []
+
+    # live probes (best effort — the files alone are enough for offline work)
+    launch_ok = None
+    ready = "unknown"
+    live_rules = None
+    try:
+        r = subprocess.run(["kubectl", "get", "nodes", "--no-headers"],
+                           capture_output=True, text=True, timeout=30)
+        if r.returncode == 0:
+            launch_ok = True
+            lines = [l for l in r.stdout.splitlines() if l.strip()]
+            ready = f"{sum(' Ready' in l for l in lines)}/{len(lines)} Ready"
+            c = subprocess.run(["kubectl", "get", "networkchaos", "-n", "arena-net",
+                                "-o", "name"], capture_output=True, text=True, timeout=60)
+            if c.returncode == 0:
+                live_rules = [l.split("/", 1)[-1] for l in c.stdout.splitlines() if l.strip()]
+    except Exception:
+        pass
+
+    # prefer the LIVE rule list for future diffs; fall back to the local file
+    chaos_path = OUT_DIR / "chaos.yaml"
+    names = live_rules if live_rules is not None else (
+        sorted(_chaos_docs(chaos_path.read_text(encoding="utf-8")))
+        if chaos_path.exists() else [])
+
+    text = (f"Attached to the existing testbed '{data.get('cluster_name')}': "
+            f"{len(all_nodes)} nodes on {len(hosts)} host(s), "
+            f"cluster {'reachable, ' + ready if launch_ok else 'NOT reachable via kubectl'}, "
+            f"{len(names)} chaos rules tracked, "
+            f"{len(active_exceptions)} dynamic exception(s) active.")
+    return {"cluster_found": True,
+            "scenario": scenario,
+            "nodes_json_path": str(nodes_path),
+            "topology_yaml_path": str(topo_path),
+            "chaos_yaml_path": str(chaos_path) if chaos_path.exists() else None,
+            "launch_ok": launch_ok,
+            "active_exceptions": active_exceptions,
+            "region_overrides": [],
+            "chaos_resource_names": sorted(names),
+            "messages": [AIMessage(content=text)]}
+
+
+def after_read_cluster(state: ArenaWorkflowState) -> str:
+    return "ask_next" if state.get("cluster_found") else "read_scenario"
 
 
 # ---------------------------------------------------------------------------

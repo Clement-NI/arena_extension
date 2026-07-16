@@ -23,7 +23,9 @@ from langgraph.graph import END, START, StateGraph
 
 from ai_agent.utils.nodes import (
     after_ask,
+    after_entry,
     after_read,
+    after_read_cluster,
     after_summarize,
     after_validate,
     ask_next,
@@ -33,8 +35,10 @@ from ai_agent.utils.nodes import (
     generate_configs,
     launch_arena,
     publish_configs,
+    read_cluster,
     read_scenario,
     report_final,
+    route_entry,
     summarize,
     validate_configs,
 )
@@ -45,7 +49,9 @@ def build_workflow(model=None, checkpointer=None):
     """Compile the orchestration graph. `model` overrides the extraction LLM."""
     g = StateGraph(ArenaWorkflowState)
 
-    # the two LLM-using nodes get the model injected; the rest are deterministic
+    # the LLM-using nodes get the model injected; the rest are deterministic
+    g.add_node("route_entry", partial(route_entry, model=model))
+    g.add_node("read_cluster", read_cluster)
     g.add_node("read_scenario", partial(read_scenario, model=model))
     g.add_node("generate_configs", generate_configs)
     g.add_node("validate_configs", validate_configs)
@@ -58,7 +64,14 @@ def build_workflow(model=None, checkpointer=None):
     g.add_node("clean_cluster", clean_cluster)
     g.add_node("report_final", report_final)
 
-    g.add_edge(START, "read_scenario")
+    # entry: build a new testbed, or attach to the existing one
+    g.add_edge(START, "route_entry")
+    g.add_conditional_edges("route_entry", after_entry,
+                            {"read_scenario": "read_scenario",
+                             "read_cluster": "read_cluster"})
+    g.add_conditional_edges("read_cluster", after_read_cluster,
+                            {"ask_next": "ask_next",
+                             "read_scenario": "read_scenario"})
     g.add_conditional_edges("read_scenario", after_read,
                             {"generate_configs": "generate_configs", END: END})
     g.add_edge("generate_configs", "validate_configs")

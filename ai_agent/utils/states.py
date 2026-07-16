@@ -191,6 +191,16 @@ class ScenarioSpec(BaseModel):
         return out
 
 
+class EntryDecision(BaseModel):
+    """START routing: build a new testbed, or attach to an existing one."""
+
+    mode: Literal["new", "existing", "unclear"] = Field(
+        description="'new' = the user describes a cluster to create/launch; "
+                    "'existing' = they want to work with the already-running "
+                    "Arena cluster (adjust its network, clean it, ...); "
+                    "'unclear' = cannot tell")
+
+
 class NextAction(BaseModel):
     """Classification of the user's answer after the summary."""
 
@@ -266,6 +276,10 @@ class DynamicScenario(BaseModel):
 
 class ArenaWorkflowState(MessagesState):
     """Carried across scenario -> configs -> launch -> chaos -> clean."""
+
+    # step 0 — entry routing (new cluster vs attach to existing)
+    entry_mode: Optional[str]           # "new" | "existing"
+    cluster_found: Optional[bool]       # read_cluster: artifacts located?
 
     # step 1 — scenario understanding
     scenario: Optional[dict]            # ScenarioSpec.model_dump()
