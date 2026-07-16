@@ -78,6 +78,7 @@ from ai_agent.configurations.setting import (
 )
 from ai_agent.utils.states import (
     ArenaWorkflowState,
+    ChaosPatch,
     DynamicScenario,
     EntryDecision,
     NextAction,
@@ -622,23 +623,92 @@ def _apply_patches(patches, exceptions: list, overrides: list, workers: list) ->
     return "; ".join(notes)
 
 
+def _salvage_dynamic(exc: Exception) -> DynamicScenario | None:
+    """Recover DynamicScenario from a failed structured-output call.
+
+    Weak models often answer with *almost* valid content — a bare patch array,
+    a fenced ```json block, prose around the JSON. The parser rejects that,
+    but the completion is embedded in the exception; re-parse it through the
+    schema's tolerant validators before giving up.
+    """
+    raw = str(getattr(exc, "llm_output", "") or "")
+    if not raw:
+        m = re.search(r"from completion (.*)\. Got:", str(exc), re.S)
+        raw = m.group(1).strip() if m else ""
+    raw = re.sub(r"^```[a-z]*\s*|\s*```$", "", raw.strip())
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except Exception:
+        m = re.search(r"[\[{].*[\]}]", raw, re.S)   # JSON island inside prose
+        if not m:
+            return None
+        try:
+            data = json.loads(m.group(0))
+        except Exception:
+            return None
+    try:
+        return DynamicScenario.model_validate(data)
+    except Exception:
+        return None
+
+
+_FAIL_WORDS = r"fail|down\b|die|dead|crash|broke|offline|lost|挂|坏|故障|失败|宕"
+_RESTORE_WORDS = r"restor|recover|back\b|online|healed|恢复|修复"
+
+
+def _keyword_patches(event: str, workers: list) -> DynamicScenario | None:
+    """Model-free fallback for the common runtime events.
+
+    'IoT-3 failed', 'iot-3 is down', 'IoT-3 recovered', 'reset' — these must
+    work even when the extraction model emits garbage.
+    """
+    low = event.lower()
+    if re.search(r"\breset\b|重置|初始状态", low):
+        return DynamicScenario(question="", patches=[ChaosPatch(action="reset_all")])
+    named = [w for w in workers
+             if re.search(rf"(?<![\w-]){re.escape(w.lower())}(?![\w-])", low)]
+    if not named:
+        return None
+    if re.search(_RESTORE_WORDS, low):
+        action = "restore_node"
+    elif re.search(_FAIL_WORDS, low):
+        action = "fail_node"
+    else:
+        return None
+    return DynamicScenario(
+        question="", patches=[ChaosPatch(action=action, node=n) for n in named])
+
+
 def dynamic_scenario(state: ArenaWorkflowState, model=None) -> dict:
     event = next((m.content for m in reversed(state["messages"])
                   if getattr(m, "type", "") == "human"), "")
     workers = _testbed_workers(state)
 
-    # 1. one small LLM call: sentence -> patches
+    # 1. one small LLM call: sentence -> patches. If the model's answer can't
+    #    be parsed, first try to salvage its raw completion, then fall back to
+    #    deterministic keyword parsing of the common events.
+    parsed = None
     try:
-        parsed: DynamicScenario = _get_llm(model).with_structured_output(DynamicScenario).invoke(
+        parsed = _get_llm(model).with_structured_output(DynamicScenario).invoke(
             [SystemMessage(ADJUST_PROMPT +
                            f"\nKnown worker nodes ({len(workers)}): "
                            f"{', '.join(workers[:40])}{'...' if len(workers) > 40 else ''}"),
              HumanMessage(event)]
         )
     except Exception as e:
-        return {"messages": [AIMessage(content=
-            f"I couldn't parse that adjustment ({type(e).__name__}). Try e.g. "
-            "'IoT-3 failed' or 'edge-1 to cloud-2: 200ms, 5% loss'.")]}
+        err = e
+        parsed = _salvage_dynamic(e) or _keyword_patches(event, workers)
+        if parsed is None:
+            return {"messages": [AIMessage(content=
+                f"I couldn't parse that adjustment ({type(e).__name__}: "
+                f"{str(e)[:300]}). Try e.g. 'IoT-3 failed' or "
+                "'edge-1 to cloud-2: 200ms, 5% loss'.")]}
+    if not parsed.patches:
+        # the model answered but produced nothing usable — keywords may still
+        # recognize a plain "X failed / recovered / reset"
+        parsed = _keyword_patches(event, workers) or parsed
     if not parsed.patches:
         q = parsed.question or ("Which node or link should change? E.g. "
                                 "'IoT-3 failed' or 'iot <-> cloud now 100ms'.")
