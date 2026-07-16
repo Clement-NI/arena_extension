@@ -70,8 +70,7 @@ def build_workflow(model=None, checkpointer=None):
                             {"read_scenario": "read_scenario",
                              "read_cluster": "read_cluster"})
     g.add_conditional_edges("read_cluster", after_read_cluster,
-                            {"ask_next": "ask_next",
-                             "read_scenario": "read_scenario"})
+                            {"ask_next": "ask_next"})
     g.add_conditional_edges("read_scenario", after_read,
                             {"generate_configs": "generate_configs", END: END})
     g.add_edge("generate_configs", "validate_configs")

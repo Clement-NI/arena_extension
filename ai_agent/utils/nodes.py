@@ -489,9 +489,9 @@ def ask_next(state: ArenaWorkflowState, model=None) -> dict:
         action = verdict.action
     except Exception:                    # weak model / no key: keyword fallback
         low = answer.lower()
-        if any(k in low for k in ("clean", "tear", "delete", "清", "删")):
+        if any(k in low for k in ("clean", "tear", "delete")):
             action = "clean"
-        elif any(k in low for k in ("no", "done", "nothing", "stop", "不用", "没有")):
+        elif any(k in low for k in ("no", "done", "nothing", "stop")):
             action = "done"
         else:
             action = "adjust"
