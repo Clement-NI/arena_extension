@@ -1,0 +1,7 @@
+{
+  "dependencies": [".."],
+  "graphs": {
+    "arena_workflow": "ai_agent.utils.workflow:make_workflow_graph"
+  },
+  "env": "./.env"
+}

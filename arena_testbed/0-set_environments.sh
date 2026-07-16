@@ -41,7 +41,9 @@ echo \
 apt-get update
 
 VERSION_STRING=5:28.0.4-1~debian.11~bullseye
-apt-get install -y docker-ce=$VERSION_STRING docker-ce-cli=$VERSION_STRING containerd.io docker-buildx-plugin docker-compose-plugin
+# --allow-downgrades: hosts (e.g. Grid'5000) may ship a newer docker than the
+# pin; without it apt aborts and the whole bootstrap dies before daemon.json.
+apt-get install -y --allow-downgrades docker-ce=$VERSION_STRING docker-ce-cli=$VERSION_STRING containerd.io docker-buildx-plugin docker-compose-plugin
 
 wget https://get.helm.sh/helm-v3.17.4-linux-amd64.tar.gz
 tar -zxvf helm-v3.17.4-linux-amd64.tar.gz
@@ -49,8 +51,13 @@ mv linux-amd64/helm /usr/local/bin/helm
 rm -rf linux-amd64/
 rm -f helm-v3.17.4-linux-amd64.tar.gz
 
+# Keep docker storage on /tmp: on Grid'5000 the root partition is small
+# (~31G) and 10 kind nodes fill it instantly, while /tmp is the big local
+# disk. /tmp is wiped between jobs, so re-running this script reconfigures it.
+mkdir -p /tmp/docker-data
 sudo bash -c 'cat > /etc/docker/daemon.json <<EOF
 {
+  "data-root": "/tmp/docker-data",
   "default-ulimits": {
     "nofile": {
       "Name": "nofile",
@@ -63,6 +70,7 @@ EOF'
 
 sudo systemctl daemon-reload
 sudo systemctl restart docker
+docker info | grep -E "Server Version|Docker Root Dir" || true
 
 echo 'fs.inotify.max_user_instances=2048' | sudo tee /etc/sysctl.d/99-inotify-instances.conf
 sudo sysctl --system
