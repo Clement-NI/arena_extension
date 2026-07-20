@@ -36,9 +36,10 @@ sleep 5
 
 git clone https://github.com/Clement-NI/arena_extension.git
 cd arena_extension
+git checkout ai_agent_for_arena
 chmod -R +x .
 docker context ls 
-cd arena_extension
+cd arena_testbed/
 ./0b-setup-multihost.sh (<host 1>, <host 2>) ##If multi-host. Then follow the instructions by script
 
 
