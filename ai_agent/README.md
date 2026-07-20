@@ -13,9 +13,6 @@ The entrance is cli and the agent is initialized in `ai_chatbot.py`.
 
 | path | role |
 |------|------|
-| `ai_chatbot.py` | `build_agent()` — initializes the LangGraph agent (LLM + tools + system prompt + optional human-in-the-loop). |
-| `cli/cli.py` | interactive REPL that streams the dialogue. |
-| `system_prompts/system_prompt.py` | `SYSTEM_PROMPT` directing the model to generate `nodes.json` + `topology.yaml` via tools, not free-hand YAML. |
 | `utils/tools.py` | `ALL_TOOLS` registry handed to the agent. |
 | `utils/agent_tools/generation_tool.py` | `write_config_file`, `compile_topology` — write configs and run Arena's real `tools/topology` compiler. |
 | `utils/agent_tools/correction_tool.py` | `validate_topology` — validate via Arena's loader, returning fixable path-style errors. |
@@ -28,17 +25,11 @@ hallucinated fields.
 ## Quick start
 
 ```bash
-# from the repo root (so `tools.topology` and `ai_agent` are importable)
+# install the necessary
 pip install -r ai_agent/requirements.txt
 
-cp ai_agent/.env.example ai_agent/.env
-# edit ai_agent/.env: set ANTHROPIC_API_KEY (or OPENAI_API_KEY) and,
-# optionally, ARENA_AGENT_MODEL (default: anthropic:claude-opus-4-8)
-
-python -m ai_agent.cli.cli
+langgraph dev
 ```
 
-Pick a different LLM by setting `ARENA_AGENT_MODEL` (e.g. `openai:gpt-4.1`) or by
-passing `build_agent(model="...")`. To require human approval before any file is
-written, use `build_agent(human_in_the_loop=True)`.
+Pick a different LLM by setting `DEFAULT_MODEL` (e.g. `openai:gpt-4.1`) in configurations/setting.py
 
