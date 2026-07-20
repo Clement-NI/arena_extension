@@ -1,0 +1,12 @@
+# Copy to ai_agent/.env and fill in. ai_agent/.env is gitignored.
+
+# Pick ONE provider key matching ARENA_AGENT_MODEL below.
+# ANTHROPIC_API_KEY =
+
+# GEMINI_API_KEY=
+
+# OLLAMA_API_KEY =
+
+# OPENAI_API_KEY=
+
+# LANGSMITH_API_KEY=

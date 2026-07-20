@@ -45,44 +45,6 @@ cd arena_testbed/
 ./0b-setup-multihost.sh (<host 1>, <host 2>) ##If multi-host. Then follow the instructions by script
 
 
-## Try to lauch a cluster of multihost to test
-cd ~/arena_extension/arena_testbed
-
-MGR_IP=$(hostname -I | awk '{print $1}')
-mapfile -t W < <(docker context ls --format '{{.Name}}' | grep -v '^default$')
-echo "manager=$MGR_IP  worker1=${W[0]}  worker2=${W[1]}"
-W0_IP=$(ssh root@${W[0]} "hostname -I | awk '{print \$1}'")
-W1_IP=$(ssh root@${W[1]} "hostname -I | awk '{print \$1}'")
-echo "${W[0]}=$W0_IP   ${W[1]}=$W1_IP"
-
-
-cat > nodes.json <<JSON
-{
-  "cluster_name": "arena-testbed",
-  "hosts": [
-    { "context": "default", "addr": "$MGR_IP", "ssh": "",
-      "nodes": [
-        { "name": "Controller", "tier": "Controller", "role": "control-plane", "cpu": "4", "memory": "8Gi" },
-        { "name": "Cloud", "tier": "Cloud", "role": "worker", "cpu": "8", "memory": "16Gi" }
-      ]},
-    { "context": "${W[0]}", "addr": "$W0_IP", "ssh": "ssh://root@${W[0]}",
-      "nodes": [
-        { "name": "Edge-1", "tier": "Edge", "role": "worker", "cpu": "2", "memory": "4Gi" },
-        { "name": "Edge-2", "tier": "Edge", "role": "worker", "cpu": "2", "memory": "4Gi" }
-      ]},
-    { "context": "${W[1]}", "addr": "$W1_IP", "ssh": "ssh://root@${W[1]}",
-      "nodes": [
-        { "name": "IoT-1", "tier": "IoT", "role": "worker", "cpu": "1", "memory": "2Gi" },
-        { "name": "IoT-2", "tier": "IoT", "role": "worker", "cpu": "1", "memory": "2Gi" },
-        { "name": "IoT-3", "tier": "IoT", "role": "worker", "cpu": "1", "memory": "2Gi" }
-      ]}
-  ]
-}
-JSON
-
-
-jq '.hosts[] | {context, addr}' nodes.json
-
 ## lauch the cluster without CNI
 ./1-launch_cluster.sh
 
@@ -95,7 +57,7 @@ jq '.hosts[] | {context, addr}' nodes.json
 
 
 
-## In other machines
+## In other machines (for a cluster with large scale)
 sysctl -w fs.inotify.max_user_instances=8192
 sysctl -w fs.inotify.max_user_watches=1048576
 sysctl -w kernel.keys.maxkeys=20000

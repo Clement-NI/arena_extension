@@ -7,6 +7,9 @@ It can take the prompt and generate the scenario in real world that we expect. T
 it will generate the configuration files like .json and .yaml or other configuration files for the 
 applications that run in pods. 
 
+To make sure that you have put the api keys for `LangSmith` and for the LLM that you need in ai_agent/.env. 
+Like "LANGSMITH_API_KEY= dhewuocihe0v"
+
 ## Layout
 
 | path | role |
