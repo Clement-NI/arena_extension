@@ -88,7 +88,7 @@ jq '.hosts[] | {context, addr}' nodes.json
 
 
 ##Nettoyer
-./3-clean_cluster.sh
+./3-clean_cluster.sh (<HOST 1>,<HOST 2>...)
 
 
 
@@ -114,7 +114,6 @@ docker info | grep "Docker Root Dir"
 sysctl fs.inotify.max_user_instances          
 
 
- 
 ## Launch the Ai agent with langgraph dev
 
 # You can lauch the ai agent with just the docker context of multi hosts (or you don't have to get it when you are in the "single
