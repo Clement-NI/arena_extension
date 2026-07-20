@@ -81,8 +81,8 @@ sysctl fs.inotify.max_user_instances
 
 ## Launch the Ai agent with langgraph dev
 
-### You can lauch the ai agent with just the docker context of multi hosts (or you don't have to get it when you are in the "single
-host" mode)
+### You can lauch the ai agent with just the docker context of multi hosts (or you don't have to get it when you are in the "single host" mode)
+
 ### Make sure that the LLMs are disponible here. If it's not the case, fill in `.env` your API keys for the LLM.
 langgraph dev.
 
