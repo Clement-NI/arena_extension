@@ -38,7 +38,6 @@ sleep 5
 
 git clone https://github.com/Clement-NI/arena_extension.git
 cd arena_extension
-git checkout ai_agent_for_arena
 chmod -R +x .
 docker context ls 
 cd arena_testbed/
