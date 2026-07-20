@@ -31,6 +31,13 @@ langgraph dev
 
 Pick a different LLM by setting `DEFAULT_MODEL` (e.g. `openai:gpt-4.1`) in configurations/setting.py
 
+## Usage of AI Agent 
+You can use AI agent to create a arena cluster (single or multi host) or to read the actual arena cluster deployed in the host. The prompt that you can input is in ai_agent/prompts. 
+
+You can also change the chaos network configuration (modification of delay, bandwidth, loss or partition) when the agent ask you the next action to do (in the noeud of "ask_next"). You can also clean the cluster here or just end the process of ai agent.
+
+For more informations, you can look up ai_agent/system_prompts.
+
 ## More informations
 You can go to the `arena_plus_user_manuel.md` to get more informations for ai agent of arena deployed and executed 
 in Grid'5000.

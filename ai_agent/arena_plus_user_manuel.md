@@ -120,3 +120,6 @@ sysctl fs.inotify.max_user_instances
 host" mode)
 # Make sure that the LLMs are disponible here. If it's not the case, fill in `.env` your API keys for the LLM.
 langgraph dev.
+
+## Usage of AI Agent 
+You can read `ai_agent/README.md` to get more informations on the usage of Ai agent.
