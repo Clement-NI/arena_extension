@@ -31,3 +31,6 @@ langgraph dev
 
 Pick a different LLM by setting `DEFAULT_MODEL` (e.g. `openai:gpt-4.1`) in configurations/setting.py
 
+## More informations
+You can go to the `arena_plus_user_manuel.md` to get more informations for ai agent of arena deployed and executed 
+in Grid'5000.

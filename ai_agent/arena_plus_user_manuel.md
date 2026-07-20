@@ -1,8 +1,8 @@
-##reserve the hosts from Grid'5000
+## reserve the hosts from Grid'5000
 ssh nantes
 oarsub -I -p ecotype -l host=3,walltime=3:00:00 -t deploy
 kadeploy3 debian11-min --env-version 2025072511
-##Install the environnement(wget,curl,docker...)
+## Install the environnement(wget,curl,docker...)
 apt-get update
 apt-get upgrade -y
 apt-get install -y vim wget git net-tools jq
@@ -22,7 +22,7 @@ source .venv/bin/activate
 uv pip install -r ai_agent/requirements.txt
 python -m ensurepip --upgrade
 
-## If necessary, move the cach of docker to a larger disk
+# If necessary, move the cach of docker to a larger disk 
 systemctl stop docker.socket
 systemctl stop docker
 sleep 3
@@ -32,7 +32,7 @@ systemctl start docker
 sleep 5
 
 
-##Install arena
+## Install arena
 
 git clone https://github.com/Clement-NI/arena_extension.git
 cd arena_extension
@@ -42,7 +42,7 @@ cd arena_extension
 ./0b-setup-multihost.sh (<host 1>, <host 2>) ##If multi-host. Then follow the instructions by script
 
 
-## Try to lauch a cluster of multihost
+## Try to lauch a cluster of multihost to test
 cd ~/arena_extension/arena_testbed
 
 MGR_IP=$(hostname -I | awk '{print $1}')
@@ -87,7 +87,7 @@ jq '.hosts[] | {context, addr}' nodes.json
 ./2-set_frameworks.sh
 
 
-##Nettoyer
+## Clean the cluster
 ./3-clean_cluster.sh (<HOST 1>,<HOST 2>...)
 
 
