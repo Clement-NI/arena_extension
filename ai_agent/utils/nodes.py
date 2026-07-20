@@ -114,7 +114,7 @@ MAX_GENERATION_RETRIES = generation_max_retries
 
 
 LAUNCH_SCRIPTS = ["0-set_environments.sh", "1-launch_cluster.sh", "2-set_frameworks.sh"]
-CLEAN_SCRIPT = "3b-clean-multihost.sh"
+CLEAN_SCRIPT = "3-clean_cluster.sh"
 
 _EXTRACT_PROMPT = EXTRACT_PROMPT
 
@@ -145,7 +145,7 @@ def _tail(text: str, n: int = 1500) -> str:
 _EXISTING_KEYWORDS = ("existing", "already", "attach", "running cluster",
                       "current cluster", "read the cluster", "read cluster",
                       "read the arena", "read arena", "inspect", "connect to",
-                      "use the cluster", "已有", "现有", "已经", "读取", "查看")
+                      "use the cluster")
 
 
 def route_entry(state: ArenaWorkflowState, model=None) -> dict:
@@ -654,8 +654,8 @@ def _salvage_dynamic(exc: Exception) -> DynamicScenario | None:
         return None
 
 
-_FAIL_WORDS = r"fail|down\b|die|dead|crash|broke|offline|lost|挂|坏|故障|失败|宕"
-_RESTORE_WORDS = r"restor|recover|back\b|online|healed|恢复|修复"
+_FAIL_WORDS = r"fail|down\b|die|dead|crash|broke|offline|lost"
+_RESTORE_WORDS = r"restor|recover|back\b|online|healed"
 
 
 def _keyword_patches(event: str, workers: list) -> DynamicScenario | None:
@@ -665,7 +665,7 @@ def _keyword_patches(event: str, workers: list) -> DynamicScenario | None:
     work even when the extraction model emits garbage.
     """
     low = event.lower()
-    if re.search(r"\breset\b|重置|初始状态", low):
+    if re.search(r"\breset\b", low):
         return DynamicScenario(question="", patches=[ChaosPatch(action="reset_all")])
     named = [w for w in workers
              if re.search(rf"(?<![\w-]){re.escape(w.lower())}(?![\w-])", low)]

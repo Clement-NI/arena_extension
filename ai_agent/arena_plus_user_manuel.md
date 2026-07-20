@@ -15,6 +15,8 @@ curl -fsSL https://ollama.com/install.sh | sh
 ##To launch the Ai agent, you have to download ollama to get some cheap and light LLM (for free)
 
 ## Python 3.13 + venv + dependence
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source ~/.local/bin/env        
 uv python install 3.13
 cd /root/arena_extension
 uv venv --python 3.13
