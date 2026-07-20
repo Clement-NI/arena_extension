@@ -60,7 +60,7 @@ cd arena_extension/arena_testbed
 
 Teardown:
 ```bash
-./3-clean_cluster.sh
+./3-clean_cluster.sh ( <host 2>, <host 3> ... ) 
 ```
 
 ### Configuring `nodes.json`
