@@ -106,8 +106,6 @@ Field reference:
 |---|---|
 | `hosts[].context` | docker context name on the manager. Use `"default"` for the local daemon. |
 | `hosts[].addr`    | externally-reachable IP/host of that machine (kubeconfig + Swarm join). |
-| `hosts[].ssh`     | `ssh://user@host` URL used by `setup-multihost.sh` to create the docker context. Leave empty for `default`. |
-| `hosts[].cpu`, `.memory` | total capacity of this machine, used to compute per-node `system-reserved`. Optional — falls back to the local daemon's totals when omitted. |
 | `hosts[].nodes[]` | the K8s nodes scheduled on this host. Exactly one must be `control-plane`, and it lives on `hosts[0]` (the Swarm manager). |
 | `nodes[].name`    | becomes the `testbed-role` label; use as `nodeSelector: testbed-role=IoT`. Shared names = multiple nodes of the same logical role. |
 
