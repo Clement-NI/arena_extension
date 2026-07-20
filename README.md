@@ -48,7 +48,7 @@ cd arena_extension/arena_testbed
 # Builds kind from the fork; tells you how to bootstrap SSH/contexts
 ./0-set_environments.sh
 # If you wanna start arena in multi-host mode, you can use this script to generate the docker context
-./0b-setup-multihost.sh
+./0b-setup-multihost.sh ( <host 2>, <host 3> ... )
 
 # If you have remote hosts in nodes.json, run from this machine:
 #   bash /opt/kind_extension_for_arena/scripts/setup-multihost.sh \
