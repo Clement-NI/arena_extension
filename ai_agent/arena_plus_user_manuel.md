@@ -24,7 +24,7 @@ source .venv/bin/activate
 uv pip install -r ai_agent/requirements.txt
 python -m ensurepip --upgrade
 
-# If necessary, move the cach of docker to a larger disk 
+### If necessary, move the cach of docker to a larger disk 
 systemctl stop docker.socket
 systemctl stop docker
 sleep 3
@@ -81,9 +81,9 @@ sysctl fs.inotify.max_user_instances
 
 ## Launch the Ai agent with langgraph dev
 
-# You can lauch the ai agent with just the docker context of multi hosts (or you don't have to get it when you are in the "single
+### You can lauch the ai agent with just the docker context of multi hosts (or you don't have to get it when you are in the "single
 host" mode)
-# Make sure that the LLMs are disponible here. If it's not the case, fill in `.env` your API keys for the LLM.
+### Make sure that the LLMs are disponible here. If it's not the case, fill in `.env` your API keys for the LLM.
 langgraph dev.
 
 ## Usage of AI Agent 
