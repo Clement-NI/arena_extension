@@ -114,7 +114,7 @@ MAX_GENERATION_RETRIES = generation_max_retries
 
 
 LAUNCH_SCRIPTS = ["0-set_environments.sh", "1-launch_cluster.sh", "2-set_frameworks.sh"]
-CLEAN_SCRIPT = "3b-clean-multihost.sh"
+CLEAN_SCRIPT = "3-clean_cluster.sh"
 
 _EXTRACT_PROMPT = EXTRACT_PROMPT
 
@@ -142,20 +142,51 @@ def _tail(text: str, n: int = 1500) -> str:
 # 0. entry routing: build a NEW testbed, or attach to the EXISTING one
 # ---------------------------------------------------------------------------
 
+# unmistakable "work with the existing cluster" phrases
 _EXISTING_KEYWORDS = ("existing", "already", "attach", "running cluster",
                       "current cluster", "read the cluster", "read cluster",
                       "read the arena", "read arena", "inspect", "connect to",
-                      "use the cluster", "已有", "现有", "已经", "读取", "查看")
+                      "use the cluster")
+
+# a read/attach verb next to a cluster noun ("read the arena cluster", "look at
+# my current cluster", "open the testbed") also means: attach, don't build.
+_ATTACH_VERBS = ("read", "attach", "inspect", "connect", "open", "load",
+                 "look at", "check", "use", "reuse", "resume", "查看", "读取", "连接")
+_CLUSTER_NOUNS = ("cluster", "arena", "testbed", "集群")
+
+
+def _first_human_text(state: ArenaWorkflowState) -> str:
+    """First human message as plain text (content may be a list of blocks)."""
+    for m in state["messages"]:
+        if getattr(m, "type", "") != "human":
+            continue
+        c = m.content
+        if isinstance(c, str):
+            return c
+        if isinstance(c, list):   # multimodal: concatenate the text blocks
+            return " ".join(b.get("text", "") if isinstance(b, dict) else str(b)
+                            for b in c)
+        return str(c)
+    return ""
+
+
+def _looks_existing(text: str) -> bool:
+    low = text.lower()
+    if any(k in low for k in _EXISTING_KEYWORDS):
+        return True
+    # a read/attach verb co-occurring with a cluster noun, in any order
+    if any(v in low for v in _ATTACH_VERBS) and any(n in low for n in _CLUSTER_NOUNS):
+        return True
+    return False
 
 
 def route_entry(state: ArenaWorkflowState, model=None) -> dict:
-    first = next((m.content for m in state["messages"]
-                  if getattr(m, "type", "") == "human"), "")
+    first = _first_human_text(state)
     low = first.lower()
 
     # deterministic strong signals first — don't let a weak model overrule an
     # explicit "read/attach to the existing cluster"
-    if any(k in low for k in _EXISTING_KEYWORDS):
+    if _looks_existing(first):
         mode = "existing"
     else:
         try:
@@ -178,7 +209,7 @@ def route_entry(state: ArenaWorkflowState, model=None) -> dict:
             "Do you want to CREATE a new Arena cluster, or use the EXISTING one "
             "(adjust its network / clean it)? Answer 'new' or 'existing'."))
         low = answer.lower()
-        mode = "existing" if any(k in low for k in _EXISTING_KEYWORDS + ("exist",)) else "new"
+        mode = "existing" if (_looks_existing(answer) or "exist" in low) else "new"
     return {"entry_mode": mode}
 
 
@@ -654,8 +685,8 @@ def _salvage_dynamic(exc: Exception) -> DynamicScenario | None:
         return None
 
 
-_FAIL_WORDS = r"fail|down\b|die|dead|crash|broke|offline|lost|挂|坏|故障|失败|宕"
-_RESTORE_WORDS = r"restor|recover|back\b|online|healed|恢复|修复"
+_FAIL_WORDS = r"fail|down\b|die|dead|crash|broke|offline|lost"
+_RESTORE_WORDS = r"restor|recover|back\b|online|healed"
 
 
 def _keyword_patches(event: str, workers: list) -> DynamicScenario | None:
@@ -665,7 +696,7 @@ def _keyword_patches(event: str, workers: list) -> DynamicScenario | None:
     work even when the extraction model emits garbage.
     """
     low = event.lower()
-    if re.search(r"\breset\b|重置|初始状态", low):
+    if re.search(r"\breset\b", low):
         return DynamicScenario(question="", patches=[ChaosPatch(action="reset_all")])
     named = [w for w in workers
              if re.search(rf"(?<![\w-]){re.escape(w.lower())}(?![\w-])", low)]

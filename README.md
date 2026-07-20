@@ -9,7 +9,6 @@ This repository contains the Arena setup scripts and experiment code used in the
 - `experiments/experiments1`: validates the emulation fidelity between containers and VMs.
 - `experiments/experiments2`: validates the network chaos injection mechanism.
 - `tools/topology/`: region-based topology compiler. Reads a `topology.yaml` declaring regions + per-region-pair rules + per-node-pair exceptions, emits NetworkChaos / probe deployments / CSV / Mermaid. See `tools/topology/README.md`.
-- `examples/`: sample `nodes.json` (3-tier with multiple instances per tier) and matching `topology.yaml`.
 
 ## Node labels
 
@@ -48,7 +47,7 @@ cd arena_extension/arena_testbed
 # Builds kind from the fork; tells you how to bootstrap SSH/contexts
 ./0-set_environments.sh
 # If you wanna start arena in multi-host mode, you can use this script to generate the docker context
-./0b-setup-multihost.sh
+./0b-setup-multihost.sh ( <host 2>, <host 3> ... )
 
 # If you have remote hosts in nodes.json, run from this machine:
 #   bash /opt/kind_extension_for_arena/scripts/setup-multihost.sh \
@@ -60,7 +59,7 @@ cd arena_extension/arena_testbed
 
 Teardown:
 ```bash
-./3-clean_cluster.sh
+./3-clean_cluster.sh ( <host 2>, <host 3> ... ) 
 ```
 
 ### Configuring `nodes.json`
@@ -106,8 +105,6 @@ Field reference:
 |---|---|
 | `hosts[].context` | docker context name on the manager. Use `"default"` for the local daemon. |
 | `hosts[].addr`    | externally-reachable IP/host of that machine (kubeconfig + Swarm join). |
-| `hosts[].ssh`     | `ssh://user@host` URL used by `setup-multihost.sh` to create the docker context. Leave empty for `default`. |
-| `hosts[].cpu`, `.memory` | total capacity of this machine, used to compute per-node `system-reserved`. Optional — falls back to the local daemon's totals when omitted. |
 | `hosts[].nodes[]` | the K8s nodes scheduled on this host. Exactly one must be `control-plane`, and it lives on `hosts[0]` (the Swarm manager). |
 | `nodes[].name`    | becomes the `testbed-role` label; use as `nodeSelector: testbed-role=IoT`. Shared names = multiple nodes of the same logical role. |
 
