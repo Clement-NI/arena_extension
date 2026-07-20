@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# setup-multihost.sh — fait les étapes 2 et 3 du checklist :
-#   - clé SSH ed25519 sur le manager (générée si absente)
-#   - propage la clé publique sur chaque worker (via ssh, demandera le
-#     mot de passe une fois par worker si SSH par mdp est activé)
-#   - ajoute les host keys des workers dans known_hosts du manager
-#   - crée le docker context pour chaque worker
-#   - vérifie que chaque daemon répond
+# setup-multihost.sh — does steps 2 and 3 of the checklist:
+#   - ed25519 SSH key on the manager (generated if missing)
+#   - propagates the public key to each worker (via ssh, will ask for the
+#     password once per worker if password-based SSH is enabled)
+#   - adds the workers' host keys to the manager's known_hosts
+#   - creates the docker context for each worker
+#   - checks that each daemon responds
 #
-# À lancer DEPUIS le manager (ex: ecotype-5).
+# Run FROM the manager (e.g. ecotype-5).
 #
 # Usage:
 #   ./setup-multihost.sh <worker1> [<worker2> ...]
-# Exemple:
+# Example:
 #   ./setup-multihost.sh ecotype-6 ecotype-47
 
 set -euo pipefail
@@ -24,16 +24,16 @@ WORKERS=("$@")
 
 step() { echo; echo "════════ $* ════════"; }
 
-# ─── 1. clé SSH ──────────────────────────────────────────────────────
-step "1. clé SSH locale"
+# ─── 1. SSH key ──────────────────────────────────────────────────────
+step "1. local SSH key"
 if [ ! -f ~/.ssh/id_ed25519 ]; then
     ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519
 fi
 PUB=$(cat ~/.ssh/id_ed25519.pub)
-echo "clé publique : ${PUB:0:60}..."
+echo "public key: ${PUB:0:60}..."
 
-# ─── 2. propager la clé + récupérer la host key ──────────────────────
-step "2. propagation de la clé sur ${#WORKERS[@]} worker(s)"
+# ─── 2. propagate the key + fetch the host key ───────────────────────
+step "2. propagating the key to ${#WORKERS[@]} worker(s)"
 mkdir -p ~/.ssh && chmod 700 ~/.ssh
 touch ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
 
@@ -42,56 +42,55 @@ NEEDS_MANUAL=()
 for w in "${WORKERS[@]}"; do
     echo
     echo "── $w ──"
-    # known_hosts (évite "Host key verification failed" sur les commandes ultérieures)
+    # known_hosts (avoids "Host key verification failed" on later commands)
     ssh-keyscan -H "$w" >> ~/.ssh/known_hosts 2>/dev/null || true
 
     if ssh -o BatchMode=yes -o ConnectTimeout=5 "root@$w" true 2>/dev/null; then
-        echo "$w : clé déjà installée ✓"
+        echo "$w: key already installed ✓"
         continue
     fi
 
-    # tentative d'install via ssh-copy-id (interactif mdp)
+    # try to install via ssh-copy-id (interactive password)
     if command -v ssh-copy-id >/dev/null && \
        ssh-copy-id -o StrictHostKeyChecking=accept-new "root@$w" 2>/dev/null; then
-        echo "$w : clé installée via ssh-copy-id ✓"
+        echo "$w: key installed via ssh-copy-id ✓"
         continue
     fi
 
-    echo "$w : install auto impossible (SSH par mdp désactivé sur le worker)"
+    echo "$w: automatic install impossible (password-based SSH disabled on the worker)"
     NEEDS_MANUAL+=("$w")
 done
 
-# Si certains workers réclament une install manuelle, on imprime UNE FOIS
-# en fin de section un bloc prêt à coller pour chaque worker concerné, puis
-# on s'arrête.
+# If some workers require a manual install, print ONCE at the end of the
+# section a ready-to-paste block for each affected worker, then stop.
 if [ "${#NEEDS_MANUAL[@]}" -gt 0 ]; then
     cat >&2 <<EOF
 
-════════ ACTION MANUELLE REQUISE ════════
+════════ MANUAL ACTION REQUIRED ════════
 
-Connecte-toi à chacun des workers ci-dessous (depuis ton frontend
-Grid'5000, pas depuis ce manager) et lance EXACTEMENT ce bloc :
+Connect to each of the workers below (from your Grid'5000 frontend,
+not from this manager) and run EXACTLY this block:
 
     mkdir -p ~/.ssh && chmod 700 ~/.ssh
     echo '$PUB' >> ~/.ssh/authorized_keys
     chmod 600 ~/.ssh/authorized_keys
 
-Workers concernés :
+Affected workers:
 EOF
     for w in "${NEEDS_MANUAL[@]}"; do
         echo "    ssh root@$w" >&2
     done
     cat >&2 <<EOF
 
-Puis relance :
+Then re-run:
     $0 ${WORKERS[*]}
 
 EOF
     exit 1
 fi
 
-# ─── 3. vérifier passwordless ────────────────────────────────────────
-step "3. vérif passwordless"
+# ─── 3. check passwordless ───────────────────────────────────────────
+step "3. passwordless check"
 for w in "${WORKERS[@]}"; do
     ssh -o BatchMode=yes -o ConnectTimeout=5 "root@$w" echo "$w OK"
 done
@@ -100,21 +99,21 @@ done
 step "4. docker contexts"
 for w in "${WORKERS[@]}"; do
     if docker context inspect "$w" >/dev/null 2>&1; then
-        echo "$w : context déjà créé ✓"
+        echo "$w: context already created ✓"
     else
         docker context create "$w" --docker host="ssh://root@$w"
     fi
 done
 
-# ─── 5. vérif daemons distants ───────────────────────────────────────
-step "5. tous les daemons répondent ?"
+# ─── 5. check remote daemons ─────────────────────────────────────────
+step "5. do all daemons respond?"
 for w in default "${WORKERS[@]}"; do
     if v=$(docker --context "$w" version --format '{{.Server.Version}}' 2>/dev/null); then
-        echo "$w : docker $v ✓"
+        echo "$w: docker $v ✓"
     else
-        echo "$w : FAIL — le daemon ne répond pas" >&2
+        echo "$w: FAIL — the daemon does not respond" >&2
         exit 1
     fi
 done
 
-step "PRÊT — tu peux maintenant lancer ./bin/kind avec ton multi.yaml"
+step "READY — you can now run ./bin/kind with your multi.yaml"
