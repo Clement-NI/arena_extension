@@ -9,7 +9,6 @@ This repository contains the Arena setup scripts and experiment code used in the
 - `experiments/experiments1`: validates the emulation fidelity between containers and VMs.
 - `experiments/experiments2`: validates the network chaos injection mechanism.
 - `tools/topology/`: region-based topology compiler. Reads a `topology.yaml` declaring regions + per-region-pair rules + per-node-pair exceptions, emits NetworkChaos / probe deployments / CSV / Mermaid. See `tools/topology/README.md`.
-- `examples/`: sample `nodes.json` (3-tier with multiple instances per tier) and matching `topology.yaml`.
 
 ## Node labels
 
