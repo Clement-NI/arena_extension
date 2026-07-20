@@ -116,4 +116,4 @@ for w in default "${WORKERS[@]}"; do
     fi
 done
 
-step "READY — you can now run ./bin/kind with your multi.yaml"
+step "READY — you can now run the arena plus in multi host mode"
